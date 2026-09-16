@@ -34,6 +34,27 @@ Issue を立ててください。日本語でも英語でも構いません。
 
 コミットには [Developer Certificate of Origin](https://developercertificate.org/) の署名を付けてください。`git commit -s` で `Signed-off-by:` 行が入ります。CLA は求めません。
 
+## 開発環境
+
+Node 22 と pnpm 10 以上が必要です。
+
+```bash
+pnpm install
+pnpm verify      # lint、typecheck、テスト、アーキテクチャ検査、リンク検査を通しで実行
+```
+
+個別に実行する場合は次のとおりです。
+
+| コマンド | 内容 |
+|---|---|
+| `pnpm lint` | ESLint |
+| `pnpm typecheck` | TypeScript の型検査 |
+| `pnpm test` | Vitest（`pnpm test:watch` で監視） |
+| `pnpm check:arch` | 層の境界の検査。`packages/core` の依存ゼロと純粋性、ルート層から永続化層への直接依存 |
+| `pnpm check:links` | ドキュメント内の相対リンクの検査 |
+
+`pnpm check:arch` と `pnpm check:links` は依存を持たない素の Node スクリプトなので、`pnpm install` の前でも動きます。
+
 ## 実装の規約
 
 実装が始まったら、[`.claude/CLAUDE.md`](.claude/CLAUDE.md) が規約の出典になります。人間の貢献者にも同じ規約が適用されます。特に次の 2 点は例外を認めません。

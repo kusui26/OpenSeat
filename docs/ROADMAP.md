@@ -24,6 +24,7 @@
 - [x] リポジトリの作成と公開（README・ライセンス・行動規範・貢献ガイド・セキュリティポリシー・テンプレート）
 - [x] 設計判断の記録（ADR 0001〜0006）
 - [x] 開発指針の整備（[`.claude/CLAUDE.md`](../.claude/CLAUDE.md)）
+- [x] 開発の足場（pnpm ワークスペース、TypeScript、ESLint、Vitest、CI）と、アーキテクチャ境界の自動検査
 - [ ] 現地観察 2 回（休日ピークと平日昼）
 - [ ] 提案資料 v0
 - [ ] `openseat.jp` の取得、npm・PyPI・Docker Hub の名前の確保

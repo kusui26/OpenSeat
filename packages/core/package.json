@@ -1,0 +1,24 @@
+{
+  "name": "@openseat/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenSeat のドメインロジック。依存ゼロの純粋関数のみを置く。",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json"
+  },
+  "dependencies": {},
+  "peerDependencies": {}
+}
