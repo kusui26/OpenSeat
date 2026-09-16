@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: セキュリティの脆弱性
+    url: https://github.com/kusui26/OpenSeat/security/advisories/new
+    about: 公開の Issue ではなく、非公開の Security Advisory から報告してください。
+  - name: 設計プラン
+    url: https://github.com/kusui26/OpenSeat/blob/main/docs/260916_plan_OpenSeat.md
+    about: 設計と方針の唯一の出典です。提案の前に該当章を確認してください。

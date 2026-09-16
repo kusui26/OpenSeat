@@ -1,0 +1,41 @@
+name: バグ報告
+description: 動作がおかしいところを報告する
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        現在は Phase 0 で実装がないため、対象は主にドキュメントと設定です。
+        **脆弱性の報告はここではなく [Security Advisory](https://github.com/kusui26/OpenSeat/security/advisories/new) からお願いします。**
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きたか
+      description: 期待した挙動と、実際の挙動を分けて書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: バージョン・コミット
+      placeholder: v0.1.0 / コミットハッシュ
+  - type: textarea
+    id: env
+    attributes:
+      label: 環境
+      placeholder: OS、ブラウザ、端末、Node のバージョンなど
+  - type: textarea
+    id: extra
+    attributes:
+      label: 補足
+      description: ログを貼る場合、トークン・秘密パラメータ・通知先を必ず伏せてください。

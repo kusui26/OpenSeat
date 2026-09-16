@@ -1,0 +1,25 @@
+name: 質問・設計の議論
+description: 設計への指摘、先行事例の情報、導入先の相談など
+labels: ["question"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 種類
+      options:
+        - 設計へのレビュー・指摘
+        - 先行事例・研究の情報
+        - 導入できそうな施設・事業者の情報
+        - 使い方の質問
+        - その他
+    validations:
+      required: true
+  - type: textarea
+    id: body
+    attributes:
+      label: 内容
+      description: |
+        設計への指摘の場合、開発プランの該当する章・節番号を書いてもらえると助かります。
+        特にコアロジック仕様（第 7 章）の穴を探す指摘を歓迎します。
+    validations:
+      required: true
