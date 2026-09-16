@@ -65,6 +65,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
+          # このジョブは依存をインストールしない。検査スクリプトは依存を持たない
+          # 素の Node スクリプトなので、pnpm を前提にしたキャッシュを無効にする。
+          package-manager-cache: false
 
       - name: 意図的な違反を検知できることを確かめる
         run: |
