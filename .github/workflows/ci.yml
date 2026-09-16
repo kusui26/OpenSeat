@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同じブランチで新しい push があれば、古い実行は打ち切る。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 品質ゲート
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: pnpm を用意する
+        uses: pnpm/action-setup@v4
+
+      - name: Node を用意する
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 依存をインストールする
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: test
+        run: pnpm test
+
+      # CLAUDE.md 3.3 が宣言している層の境界を、宣言のままにせず落とす。
+      # packages/core の依存ゼロと純粋性、ルート層から永続化層への直接依存を検査する。
+      - name: アーキテクチャ境界の検査
+        run: pnpm check:arch
+
+      - name: ドキュメントのリンク検査
+        run: pnpm check:links
+
+  # 検査スクリプト自体が壊れていないことを確かめる。
+  # 意図的な違反を作り、検査が 1 で落ちることを確認する。
+  meta:
+    name: 検査スクリプトの自己点検
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          # このジョブは依存をインストールしない。検査スクリプトは依存を持たない
+          # 素の Node スクリプトなので、pnpm を前提にしたキャッシュを無効にする。
+          package-manager-cache: false
+
+      - name: 意図的な違反を検知できることを確かめる
+        run: |
+          cat > packages/core/src/__ci_violation.ts <<'EOF'
+          export function impure(): number {
+            return Date.now() + Math.random();
+          }
+          EOF
+          if node scripts/check-architecture.mjs; then
+            echo "::error::検査が違反を見逃した。scripts/check-architecture.mjs を確認すること。"
+            exit 1
+          fi
+          echo "検査は違反を正しく検知した。"
+          rm packages/core/src/__ci_violation.ts

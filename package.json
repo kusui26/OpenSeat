@@ -1,0 +1,36 @@
+{
+  "name": "openseat",
+  "version": "0.0.0",
+  "private": true,
+  "description": "フードコートの座席順番待ちシステム",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kusui26/OpenSeat.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10"
+  },
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:arch": "node scripts/check-architecture.mjs",
+    "check:links": "node scripts/check-doc-links.mjs",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:arch && pnpm check:links",
+    "clean": "tsc --build --clean",
+    "build": "tsc --build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vitest": "^3.2.4"
+  }
+}
