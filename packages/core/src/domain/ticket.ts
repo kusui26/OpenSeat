@@ -139,6 +139,15 @@ export interface Ticket {
   /** `PAUSED` の期限。操作があるたびに延長される。 */
   readonly pauseDeadline: Timestamp | null;
 
+  /**
+   * いまの保留に入った時刻。`PAUSED` のあいだだけ入る。
+   *
+   * 保留から出るとき（準備OK・キャンセル・期限切れ）に `pausedTotal` へ足し込む
+   * ための起点である。これが無いと「実際に保留していた時間」が測れず、
+   * `pauseMaxTotalMin` を保留に入った回数で近似するほかなくなる。
+   */
+  readonly pausedSince: Timestamp | null;
+
   /** 保留していた時間の合計。`pauseMaxTotalMin` の判定に使う。 */
   readonly pausedTotal: DurationMs;
 
@@ -175,6 +184,7 @@ const UNFINISHED_FIELDS = {
   endedAt: null,
   endReason: null,
   pauseDeadline: null,
+  pausedSince: null,
   pausedTotal: 0,
   stillHereAskedAt: null,
 } as const;

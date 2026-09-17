@@ -147,6 +147,13 @@ describe('createTicket', () => {
     expect(ticket.pausedTotal).toBe(0);
   });
 
+  it('保留の欄は空から始まる（まだ一度も保留していない）', () => {
+    const ticket = createTicket({ id: 't1', code: 'A-01', partySize: 2, now: NOW });
+    expect(ticket.pauseDeadline).toBeNull();
+    expect(ticket.pausedSince).toBeNull();
+    expect(ticket.pausedTotal).toBe(0);
+  });
+
   it('希望タグと通知手段は省略できる', () => {
     const ticket = createTicket({ id: 't1', code: 'A-01', partySize: 2, now: NOW });
     expect(ticket.requiredTags).toEqual([]);

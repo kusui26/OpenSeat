@@ -12,7 +12,7 @@
 import type { Policy } from './policy.js';
 import type { Table } from './table.js';
 import type { TableId, TicketCode, TicketId, VenueId } from './ids.js';
-import type { Ticket } from './ticket.js';
+import type { Ticket, TicketState } from './ticket.js';
 import { isActive } from './ticket.js';
 
 export interface VenueState {
@@ -83,6 +83,19 @@ export function waitingTickets(state: VenueState): readonly Ticket[] {
   return state.tickets.filter((ticket) => ticket.state === 'WAITING');
 }
 
+/**
+ * 待ち行列に並んでいるチケット（全体プラン 7.16 の `max_queue_length`）。
+ *
+ * 待っている人（`WAITING`）、順番を保持したまま保留している人（`PAUSED`）、
+ * 席が確保されていてまだ座っていない人（`CALLED`）を数える。着席した人は
+ * 行列から出ているので含めない。
+ */
+export function queuedTickets(state: VenueState): readonly Ticket[] {
+  return state.tickets.filter((ticket) => QUEUED_STATES.has(ticket.state));
+}
+
+const QUEUED_STATES: ReadonlySet<TicketState> = new Set<TicketState>(['WAITING', 'PAUSED', 'CALLED']);
+
 /** 管理対象の席。 */
 export function managedTables(state: VenueState): readonly Table[] {
   return state.tables.filter((table) => table.enabled);
@@ -113,6 +126,30 @@ export function ticketCodeFor(seq: number): TicketCode {
 /** 次に発行する表示コード。採番カウンタを進めるのは呼び出し側の責務。 */
 export function nextTicketCode(state: VenueState): TicketCode {
   return ticketCodeFor(state.nextCodeSeq);
+}
+
+/** 発行できる表示コードと、その次の採番位置。空きが無ければ null。 */
+export interface CodeAllocation {
+  readonly code: TicketCode;
+  readonly nextSeq: number;
+}
+
+/**
+ * 生きているチケットが使っていない表示コードを 1 つ選ぶ。
+ *
+ * カウンタを進めるだけでは、一巡したときに使用中のコードとぶつかる。そのときは
+ * `unique_active_codes` が破れて受付ができなくなるので、使用中のものを飛ばす。
+ * 2,574 通りすべてが埋まっていれば `null` を返す（席 100・待ち上限 100 の運用では
+ * 起こらないが、上限を極端に上げた施設では起こりうる）。
+ */
+export function allocateTicketCode(state: VenueState): CodeAllocation | null {
+  const inUse: ReadonlySet<TicketCode> = new Set(activeTickets(state).map((ticket) => ticket.code));
+  for (let step = 0; step < CODE_SPACE_SIZE; step += 1) {
+    const seq: number = state.nextCodeSeq + step;
+    const code: TicketCode = ticketCodeFor(seq);
+    if (!inUse.has(code)) return { code, nextSeq: seq + 1 };
+  }
+  return null;
 }
 
 // ---- 受け付けられる最大人数 ----
@@ -192,15 +229,23 @@ function sameTicketIdentity(a: Ticket, b: Ticket): boolean {
   );
 }
 
-function sameTicketTimes(a: Ticket, b: Ticket): boolean {
+/** 順番と、呼び出し・着席・終了の時刻が同じか。 */
+function sameTicketProgress(a: Ticket, b: Ticket): boolean {
   return (
     a.priorityAt === b.priorityAt &&
     a.createdAt === b.createdAt &&
     a.calledAt === b.calledAt &&
     a.holdDeadline === b.holdDeadline &&
     a.seatedAt === b.seatedAt &&
-    a.endedAt === b.endedAt &&
+    a.endedAt === b.endedAt
+  );
+}
+
+/** 保留と、利用者の画面との接続に関する時刻が同じか。 */
+function sameTicketPresence(a: Ticket, b: Ticket): boolean {
+  return (
     a.pauseDeadline === b.pauseDeadline &&
+    a.pausedSince === b.pausedSince &&
     a.pausedTotal === b.pausedTotal &&
     a.lastSeenAt === b.lastSeenAt &&
     a.stillHereAskedAt === b.stillHereAskedAt
@@ -221,7 +266,12 @@ function sameTicketCounters(a: Ticket, b: Ticket): boolean {
 
 /** 2 つのチケットが同じ内容か。 */
 export function sameTicket(a: Ticket, b: Ticket): boolean {
-  return sameTicketIdentity(a, b) && sameTicketTimes(a, b) && sameTicketCounters(a, b);
+  return (
+    sameTicketIdentity(a, b) &&
+    sameTicketProgress(a, b) &&
+    sameTicketPresence(a, b) &&
+    sameTicketCounters(a, b)
+  );
 }
 
 /**

@@ -111,7 +111,13 @@ export function waste(table: Table, ticket: Ticket): number {
   return table.capacity - ticket.partySize;
 }
 
-export interface Pick {
+/**
+ * 選ばれた 1 組と、その理由。
+ *
+ * 名前を `Pick` にしないのは、TypeScript 標準の `Pick<T, K>` を隠してしまうため。
+ * 公開する型なので、取り込んだ側で標準の道具が使えなくなることを避ける。
+ */
+export interface CandidatePick {
   readonly ticket: Ticket;
   readonly reason: AssignmentReason;
 }
@@ -130,7 +136,7 @@ export function pickCandidate(
   candidates: readonly Ticket[],
   table: Table,
   policy: Policy,
-): Pick | null {
+): CandidatePick | null {
   const byPriority = [...candidates].sort(comparePriority);
   const longest = byPriority[0];
   if (longest === undefined) return null;

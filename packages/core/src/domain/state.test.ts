@@ -6,6 +6,8 @@ import { createTicket, type Ticket } from './ticket.js';
 import {
   CODE_SPACE_SIZE,
   activeTickets,
+  allocateTicketCode,
+  queuedTickets,
   sameTable,
   sameTicket,
   sameVenueState,
@@ -275,5 +277,72 @@ describe('状態の比較', () => {
     it('設定が同じ参照なら真', () => {
       expect(sameVenueState(base, { ...base })).toBe(true);
     });
+
+    it('保留の起点が違えば偽（保留の合計時間の計算に効くため）', () => {
+      const paused: Ticket = { ...ticket('k1'), pausedSince: NOW };
+      expect(sameTicket(ticket('k1'), paused)).toBe(false);
+    });
+  });
+});
+
+describe('queuedTickets（待ち行列の長さ・7.16 の max_queue_length）', () => {
+  it('待っている人・保留の人・呼び出し中の人を数える', () => {
+    const state = stateWith(
+      [],
+      [ticket('k1', 'WAITING'), ticket('k2', 'PAUSED'), ticket('k3', 'CALLED')],
+    );
+    expect(queuedTickets(state).map((item) => item.id)).toEqual(['k1', 'k2', 'k3']);
+  });
+
+  it('着席した人は行列から出ているので数えない', () => {
+    const state = stateWith([], [ticket('k1', 'SEATED')]);
+    expect(queuedTickets(state)).toEqual([]);
+  });
+
+  it.each(['DONE', 'CANCELLED', 'NO_SHOW', 'EXPIRED'] as const)('終わった %s は数えない', (ended) => {
+    expect(queuedTickets(stateWith([], [ticket('k1', ended)]))).toEqual([]);
+  });
+
+  it('保留の人を数えるので、保留に逃げても行列の上限は緩まない', () => {
+    const paused = Array.from({ length: 3 }, (_unused, index) => ticket(`k${index}`, 'PAUSED'));
+    expect(queuedTickets(stateWith([], paused))).toHaveLength(3);
+  });
+});
+
+describe('allocateTicketCode（表示コードの採番）', () => {
+  it('誰も居なければカウンタどおりのコードを返す', () => {
+    expect(allocateTicketCode(stateWith([]))).toEqual({ code: 'A-01', nextSeq: 1 });
+  });
+
+  it('使用中のコードは飛ばす', () => {
+    const inUse: Ticket = { ...ticket('k1', 'WAITING'), code: 'A-01' };
+    expect(allocateTicketCode(stateWith([], [inUse]))).toEqual({ code: 'A-02', nextSeq: 2 });
+  });
+
+  it('終わったチケットのコードは再利用する（生きている分だけが一意であればよい）', () => {
+    const ended: Ticket = { ...ticket('k1', 'DONE'), code: 'A-01' };
+    expect(allocateTicketCode(stateWith([], [ended]))).toEqual({ code: 'A-01', nextSeq: 1 });
+  });
+
+  it('連続する使用中のコードをまとめて飛ばす', () => {
+    const inUse = ['A-01', 'A-02', 'A-03'].map((code, index) => ({
+      ...ticket(`k${index}`, 'WAITING'),
+      code,
+    }));
+    expect(allocateTicketCode(stateWith([], inUse))?.code).toBe('A-04');
+  });
+
+  it('生きているチケットが全コードを使っていれば null を返す', () => {
+    const everyCode = Array.from({ length: CODE_SPACE_SIZE }, (_unused, seq) => ({
+      ...ticket(`k${seq}`, 'WAITING'),
+      code: ticketCodeFor(seq),
+    }));
+    expect(allocateTicketCode(stateWith([], everyCode))).toBeNull();
+  });
+
+  it('一巡したあとも、空いているコードを見つける', () => {
+    const base = stateWith([], [{ ...ticket('k1', 'WAITING'), code: 'A-01' }]);
+    const wrapped: VenueState = { ...base, nextCodeSeq: CODE_SPACE_SIZE - 1 };
+    expect(allocateTicketCode(wrapped)).toEqual({ code: 'Z-99', nextSeq: CODE_SPACE_SIZE });
   });
 });

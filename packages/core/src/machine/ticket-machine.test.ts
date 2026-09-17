@@ -7,7 +7,9 @@ import {
 } from '../domain/ticket.js';
 import { ambiguous, canReachAny, duplicates, outgoing, reachableFrom, statesIn } from './graph.js';
 import {
+  HEARTBEAT_APPLIES_TO,
   MAX_AGE_APPLIES_TO,
+  PARTY_SIZE_CHANGE_APPLIES_TO,
   TICKET_EVENTS,
   TICKET_GUARDS,
   TICKET_INITIAL_STATES,
@@ -33,6 +35,7 @@ const DIAGRAM_ARROWS: readonly (readonly [TicketState, TicketState, string])[] =
   ['WAITING', 'CANCELLED', '本人キャンセル／スタッフ／施設都合'],
   ['WAITING', 'EXPIRED', '放置／受付からの絶対上限'],
   ['PAUSED', 'WAITING', '「準備OK」'],
+  ['PAUSED', 'PAUSED', '「延長」（保留の合計上限まで）'],
   ['PAUSED', 'CANCELLED', '本人キャンセル／スタッフ／施設都合'],
   ['PAUSED', 'EXPIRED', '保留の上限超過／受付からの絶対上限'],
   ['CALLED', 'SEATED', '座席QR読み取り／コード入力／スタッフ確認'],
@@ -61,8 +64,8 @@ describe('遷移表と全体プラン 7.3 の図の対応', () => {
     expect(extra.map((row) => `${row.from}->${row.to}（${row.on}）`)).toEqual([]);
   });
 
-  it('表は 25 本の遷移を宣言している', () => {
-    expect(TICKET_TRANSITIONS).toHaveLength(25);
+  it('表は 26 本の遷移を宣言している', () => {
+    expect(TICKET_TRANSITIONS).toHaveLength(26);
   });
 });
 
@@ -217,5 +220,48 @@ describe('受付からの絶対上限の適用範囲', () => {
 
   it('SEATED には適用しない（着席時間の上限が別に働く）', () => {
     expect(transit(TICKET_TRANSITIONS, 'SEATED', 'MAX_AGE', ALL_PASS).kind).toBe('undeclared');
+  });
+});
+
+describe('状態を変えないコマンドの適用範囲', () => {
+  it('心拍は生きている 4 状態すべてで受け付ける', () => {
+    expect([...HEARTBEAT_APPLIES_TO].sort()).toEqual([...ACTIVE_TICKET_STATES].sort());
+  });
+
+  it('心拍は終端の状態では受け付けない', () => {
+    for (const state of TERMINAL_TICKET_STATES) {
+      expect(HEARTBEAT_APPLIES_TO).not.toContain(state);
+    }
+  });
+
+  it('人数の変更は待っている間（WAITING / PAUSED）だけ受け付ける', () => {
+    expect([...PARTY_SIZE_CHANGE_APPLIES_TO].sort()).toEqual(['PAUSED', 'WAITING']);
+  });
+
+  it('人数の変更は席を持つ状態では受け付けない（定員を超えうるため）', () => {
+    expect(PARTY_SIZE_CHANGE_APPLIES_TO).not.toContain('CALLED');
+    expect(PARTY_SIZE_CHANGE_APPLIES_TO).not.toContain('SEATED');
+  });
+
+  it('どちらの事象も遷移表には現れない（状態を変えないため）', () => {
+    const events: readonly string[] = TICKET_TRANSITIONS.map((row) => row.on);
+    expect(events).not.toContain('HEARTBEAT');
+    expect(events).not.toContain('CHANGE_PARTY_SIZE');
+  });
+});
+
+describe('保留の延長（7.7 の 7）', () => {
+  it('PAUSED から PAUSED への自己遷移として宣言されている', () => {
+    const rows = matching(TICKET_TRANSITIONS, 'PAUSED', 'EXTEND');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.to).toBe('PAUSED');
+  });
+
+  it('延長は保留とホールドの両方にあり、起点で区別される', () => {
+    const fromPaused = matching(TICKET_TRANSITIONS, 'PAUSED', 'EXTEND');
+    const fromCalled = matching(TICKET_TRANSITIONS, 'CALLED', 'EXTEND');
+    expect(fromPaused).toHaveLength(1);
+    expect(fromCalled).toHaveLength(1);
+    expect(fromCalled[0]?.guard).toBe('underExtensionLimit');
   });
 });
