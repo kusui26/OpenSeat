@@ -53,7 +53,7 @@ export type TicketEvent = (typeof TICKET_EVENTS)[number];
  * | `requeueOnNoShow` | `noShowPolicy` が `requeue_once` で、期限切れが 1 回目 |
  * | `requeueToBackOnNoShow` | `noShowPolicy` が `requeue_back` |
  * | `finalNoShow` | `noShowPolicy` が `cancel`、または `requeue_once` の 2 回目 |
- * | `noNotificationChannel` | 通知手段が無く、画面の接続も切れている |
+ * | `noNotificationChannel` | 通知手段を持っていない（接続が切れてからの時間は期限が見る） |
  * | `hardLimitMode` | `timeLimitMode` が `hard` |
  */
 export const TICKET_GUARDS = [
@@ -139,7 +139,7 @@ export const TICKET_TRANSITIONS = [
     to: 'EXPIRED',
     guard: 'noNotificationChannel',
     source: '7.9',
-    note: '通知手段が無く、画面の接続も途絶えたまま時間が過ぎた',
+    note: '通知手段が無いまま、画面の接続が途絶えて放置の期限が過ぎた',
   },
   {
     from: 'WAITING',

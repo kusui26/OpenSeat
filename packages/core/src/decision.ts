@@ -32,8 +32,16 @@ export type Apply<State, Command, Event, Failure> = (
 /**
  * 時刻起因の遷移。ホールド期限・リマインド・保留期限・上限超過を、
  * 状態のタイムスタンプから計算して適用する。個別のタイマーを持たない。
+ *
+ * **`Apply` と同じ形で失敗を返す。** 時刻が進むことを業務上の理由で拒否する
+ * ことはないので、`tick` の失敗は必ず実装の誤りを意味する。それでも例外に
+ * しないのは、`apply` と出口（割当と不変条件の検査）を共有しており、
+ * 失敗の伝え方まで揃えたほうが呼び出し側が扱いやすいためである。
  */
-export type Tick<State, Event> = (state: State, now: Timestamp) => Decision<State, Event>;
+export type Tick<State, Event, Failure> = (
+  state: State,
+  now: Timestamp,
+) => Result<Decision<State, Event>, Failure>;
 
 /** 何も起きなかったことを表す。 */
 export function unchanged<State, Event>(state: State): Decision<State, Event> {

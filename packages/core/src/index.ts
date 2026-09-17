@@ -198,6 +198,8 @@ export type {
   CancelCommand,
   PauseCommand,
   ReadyCommand,
+  ExtendCommand,
+  PassCommand,
   ChangePartySizeCommand,
   HeartbeatCommand,
 } from './machine/command.js';
@@ -209,14 +211,20 @@ export { REJECTION_CODES, rejection, isDefect } from './machine/rejection.js';
 export type {
   DomainEvent,
   DomainEventType,
+  PauseReason,
   TicketJoined,
+  TicketCalled,
+  TableHeld,
+  TicketReminded,
+  TicketExtended,
   TicketPaused,
   TicketResumed,
-  TicketCancelled,
+  TicketRequeued,
   PartySizeChanged,
+  TicketEnded,
   TableFreed,
 } from './machine/events.js';
-export { DOMAIN_EVENT_TYPES } from './machine/events.js';
+export { DOMAIN_EVENT_TYPES, PAUSE_REASONS } from './machine/events.js';
 
 export type { TicketGuardContext, TableGuardContext } from './machine/guards.js';
 export {
@@ -228,10 +236,31 @@ export {
   evaluateTableGuard,
 } from './machine/guards.js';
 
+// `settle`（割当と検査の出口）と `Draft` は公開しない。外から見える入口は
+// `apply` と `tick` の 2 つだけにしておく（CLAUDE.md 3 章）。
+export { apply } from './machine/apply.js';
+
+export { ticketTransition, tableTransition } from './machine/transition.js';
+
+export type { StartedPause } from './machine/deadlines.js';
 export {
-  apply,
-  ticketTransition,
-  tableTransition,
+  holdDeadlineFor,
+  extendedHoldDeadline,
+  holdReminderAt,
+  holdExpiresAt,
+  canExtendHold,
   remainingPauseBudget,
+  pauseWindowEnd,
   pauseDeadlineFor,
-} from './machine/apply.js';
+  pauseExpiresAt,
+  startedPause,
+  closedPause,
+  maxAgeAt,
+  abandonedAt,
+} from './machine/deadlines.js';
+
+// ---- 呼び出し・ホールド・ノーショー（Phase 1 PR 6）----
+
+export { runAllocation } from './machine/allocate.js';
+export { clearedHold, endedTicket, releaseHeldTable } from './machine/release.js';
+export { tick } from './machine/tick.js';

@@ -15,39 +15,78 @@
  * それまでのあいだ、残りは `unimplementedTicketGuards()` が数え上げる。
  */
 
-import type { Table } from '../domain/table.js';
+import { fitsCapacity, satisfiesTags, type Table } from '../domain/table.js';
 import type { VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
 import type { Timestamp } from '../time.js';
+import { canExtendHold } from './deadlines.js';
 import { TICKET_GUARDS, type TicketGuard } from './ticket-machine.js';
 import { TABLE_GUARDS, type TableGuard } from './table-machine.js';
 
-/** チケットのガードが見てよいもの。施設全体の状態、対象のチケット、現在時刻。 */
+/**
+ * チケットのガードが見てよいもの。
+ *
+ * `table` は操作の対象になっている席。呼び出し（どの席へ案内するか）、着席
+ * （読み取った席が自分のものか）、席の変更で要る。対象が無い遷移では `null`。
+ */
 export interface TicketGuardContext {
   readonly state: VenueState;
   readonly ticket: Ticket;
   readonly now: Timestamp;
+  readonly table: Table | null;
 }
 
-/** テーブルのガードが見てよいもの。 */
+/** 席のガードが見てよいもの。 */
 export interface TableGuardContext {
   readonly state: VenueState;
   readonly table: Table;
   readonly now: Timestamp;
 }
 
+type TicketGuardPredicate = (context: TicketGuardContext) => boolean;
+
 /**
  * 実装済みのチケットのガード。
  *
- * **この版（PR 5）は空である。** 受付・キャンセル・保留の遷移はすべて無条件で
- * 宣言されているため、判定すべきガードがまだ無い。PR 6（呼び出しとホールド）から
- * 埋まり始める。
+ * 残り 4 つ（`isAssignedTable`、`earlyCheckInAllowed`、`swapAllowed`、
+ * `hardLimitMode`）は着席と座席 QR（PR 7・9）、着席時間の上限（PR 10）で埋める。
  */
-const TICKET_GUARD_PREDICATES: Partial<
-  Readonly<Record<TicketGuard, (context: TicketGuardContext) => boolean>>
-> = {};
+const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardPredicate>>> = {
+  /** 案内しようとしている席に人数が収まり、希望タグを満たすか（7.6）。 */
+  fitsCapacity: ({ ticket, table }) =>
+    table !== null && fitsCapacity(table, ticket.partySize) && satisfiesTags(table, ticket.requiredTags),
 
-/** 実装済みのテーブルのガード。こちらも PR 6 以降で埋まる。 */
+  /** 「向かっています」をまだ押せるか（7.7 の 4）。 */
+  underExtensionLimit: ({ ticket, state }) => canExtendHold(ticket, state.policy),
+
+  /** ホールドの期限切れ 1 回目を、順番を保持したまま保留に戻す設定か（7.7 の 6）。 */
+  requeueOnNoShow: ({ ticket, state }) =>
+    state.policy.noShowPolicy === 'requeue_once' && ticket.noShows === 0,
+
+  /** ホールドの期限切れで順番を末尾に戻す設定か（7.7 の 6）。 */
+  requeueToBackOnNoShow: ({ state }) => state.policy.noShowPolicy === 'requeue_back',
+
+  /** ホールドの期限切れで終了する場面か（7.7 の 6）。 */
+  finalNoShow: ({ ticket, state }) =>
+    state.policy.noShowPolicy === 'cancel' ||
+    (state.policy.noShowPolicy === 'requeue_once' && ticket.noShows >= 1),
+
+  /**
+   * 通知手段を持っていないか（7.9）。
+   *
+   * 「接続が切れてから何分たったか」はここでは見ない。**時間の経過は期限が
+   * 表す**（`abandonedAt`）。ほかの時刻起因の遷移（ホールドの期限切れなど）も
+   * 同じで、ガードは「どちらへ進むか」だけを決め、「いつ進むか」は期限が決める。
+   */
+  noNotificationChannel: ({ ticket }) => !ticket.hasNotificationChannel,
+};
+
+/**
+ * 実装済みの席のガード。
+ *
+ * 3 つとも、片付けの猶予（PR 7）と整合性の回復（PR 10）で使う遷移のものなので、
+ * それぞれの PR で埋める。
+ */
 const TABLE_GUARD_PREDICATES: Partial<
   Readonly<Record<TableGuard, (context: TableGuardContext) => boolean>>
 > = {};
@@ -67,7 +106,7 @@ export function unimplementedTicketGuards(): readonly TicketGuard[] {
   return TICKET_GUARDS.filter((guard) => !ticketGuardIsImplemented(guard));
 }
 
-/** 判定がまだ書かれていないテーブルのガード。PR 12 で空になる。 */
+/** 判定がまだ書かれていない席のガード。PR 12 で空になる。 */
 export function unimplementedTableGuards(): readonly TableGuard[] {
   return TABLE_GUARDS.filter((guard) => !tableGuardIsImplemented(guard));
 }

@@ -236,6 +236,7 @@ function sameTicketProgress(a: Ticket, b: Ticket): boolean {
     a.createdAt === b.createdAt &&
     a.calledAt === b.calledAt &&
     a.holdDeadline === b.holdDeadline &&
+    a.holdRemindedAt === b.holdRemindedAt &&
     a.seatedAt === b.seatedAt &&
     a.endedAt === b.endedAt
   );

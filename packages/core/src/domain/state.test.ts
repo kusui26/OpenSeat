@@ -278,6 +278,11 @@ describe('状態の比較', () => {
       expect(sameVenueState(base, { ...base })).toBe(true);
     });
 
+    it('呼び出しの知らせの記録が違えば偽（同じ知らせを繰り返さないため）', () => {
+      const reminded: Ticket = { ...ticket('k1'), holdRemindedAt: NOW };
+      expect(sameTicket(ticket('k1'), reminded)).toBe(false);
+    });
+
     it('保留の起点が違えば偽（保留の合計時間の計算に効くため）', () => {
       const paused: Ticket = { ...ticket('k1'), pausedSince: NOW };
       expect(sameTicket(ticket('k1'), paused)).toBe(false);
