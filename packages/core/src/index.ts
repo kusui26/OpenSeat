@@ -104,6 +104,9 @@ export {
   effectiveMaxPartySize,
   withTable,
   withTicket,
+  sameTable,
+  sameTicket,
+  sameVenueState,
 } from './domain/state.js';
 
 // ---- 状態機械（Phase 1 PR 2）----
@@ -140,3 +143,26 @@ export {
   TABLE_INITIAL_STATE,
   CLOSE_APPLIES_TO,
 } from './machine/table-machine.js';
+
+// ---- 不変条件（Phase 1 PR 3）----
+
+export {
+  STATE_INVARIANTS,
+  POST_ALLOCATION_INVARIANTS,
+  TRANSITION_INVARIANTS,
+  ALL_INVARIANT_NAMES,
+  uniqueIds,
+  uniqueActiveCodes,
+  assignedHasTable,
+  terminalHoldsNoTable,
+  tableLinkIsMutual,
+  assignmentStatusMatches,
+  oneTicketPerTable,
+  assignedPartyFitsCapacity,
+  heldTableHasDeadline,
+  stateTimestampsAreSet,
+  endReasonMatchesState,
+  noStarvation,
+  priorityPreservedAcrossPause,
+  tickIdempotent,
+} from './machine/invariants.js';

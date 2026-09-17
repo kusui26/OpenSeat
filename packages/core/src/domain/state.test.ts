@@ -6,6 +6,9 @@ import { createTicket, type Ticket } from './ticket.js';
 import {
   CODE_SPACE_SIZE,
   activeTickets,
+  sameTable,
+  sameTicket,
+  sameVenueState,
   createVenueState,
   effectiveMaxPartySize,
   findTable,
@@ -185,5 +188,92 @@ describe('更新のヘルパー', () => {
     const state = stateWith([], [ticket('t1')]);
     const updated = withTicket(state, ticket('nope'));
     expect(updated.tickets).toHaveLength(1);
+  });
+});
+
+describe('状態の比較', () => {
+  const base = stateWith([table('tb1', 2), table('tb2', 4)], [ticket('t1'), ticket('t2')]);
+
+  describe('sameTable', () => {
+    it('同じ内容なら真', () => {
+      expect(sameTable(table('tb1', 2), table('tb1', 2))).toBe(true);
+    });
+
+    it('定員が違えば偽', () => {
+      expect(sameTable(table('tb1', 2), table('tb1', 4))).toBe(false);
+    });
+
+    it('状態が違えば偽', () => {
+      const free = { ...table('tb1', 2), status: 'FREE' as const };
+      expect(sameTable(free, table('tb1', 2))).toBe(false);
+    });
+
+    it('タグの中身が違えば偽', () => {
+      const tagged = { ...table('tb1', 2), tags: ['power'] };
+      expect(sameTable(tagged, table('tb1', 2))).toBe(false);
+    });
+
+    it('タグの順序が違えば偽（並びも内容のうちとして扱う）', () => {
+      const a = { ...table('tb1', 2), tags: ['power', 'window'] };
+      const b = { ...table('tb1', 2), tags: ['window', 'power'] };
+      expect(sameTable(a, b)).toBe(false);
+    });
+  });
+
+  describe('sameTicket', () => {
+    it('同じ内容なら真', () => {
+      expect(sameTicket(ticket('t1'), ticket('t1'))).toBe(true);
+    });
+
+    it('状態が違えば偽', () => {
+      expect(sameTicket(ticket('t1', 'WAITING'), ticket('t1', 'PAUSED'))).toBe(false);
+    });
+
+    it('回数が違えば偽', () => {
+      expect(sameTicket({ ...ticket('t1'), extensions: 1 }, ticket('t1'))).toBe(false);
+    });
+
+    it('時刻が違えば偽', () => {
+      expect(sameTicket({ ...ticket('t1'), seatedAt: 1 }, ticket('t1'))).toBe(false);
+    });
+  });
+
+  describe('sameVenueState', () => {
+    it('同じ内容なら真（別のオブジェクトでも）', () => {
+      const other = stateWith([table('tb1', 2), table('tb2', 4)], [ticket('t1'), ticket('t2')]);
+      expect(sameVenueState(base, other)).toBe(true);
+    });
+
+    it('席が 1 つでも違えば偽', () => {
+      const changed = stateWith([table('tb1', 3), table('tb2', 4)], [ticket('t1'), ticket('t2')]);
+      expect(sameVenueState(base, changed)).toBe(false);
+    });
+
+    it('チケットが増えれば偽', () => {
+      const more = stateWith(base.tables, [...base.tickets, ticket('t3')]);
+      expect(sameVenueState(base, more)).toBe(false);
+    });
+
+    it('並び順が違えば偽（tick は並びを変えない前提）', () => {
+      const reordered = stateWith(base.tables, [ticket('t2'), ticket('t1')]);
+      expect(sameVenueState(base, reordered)).toBe(false);
+    });
+
+    it('採番カウンタが違えば偽', () => {
+      expect(sameVenueState(base, { ...base, nextCodeSeq: 1 })).toBe(false);
+    });
+
+    it('運用の状態が違えば偽', () => {
+      expect(sameVenueState(base, { ...base, operating: true })).toBe(false);
+    });
+
+    it('設定が別のオブジェクトなら偽（apply と tick は設定を作り直さない）', () => {
+      const recreated = { ...base, policy: { ...DEFAULT_POLICY } };
+      expect(sameVenueState(base, recreated)).toBe(false);
+    });
+
+    it('設定が同じ参照なら真', () => {
+      expect(sameVenueState(base, { ...base })).toBe(true);
+    });
   });
 });

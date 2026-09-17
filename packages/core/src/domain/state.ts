@@ -147,3 +147,113 @@ export function withTicket(state: VenueState, updated: Ticket): VenueState {
     tickets: state.tickets.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
   };
 }
+
+// ---- 状態の比較 ----
+
+function sameStrings(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+/** 席そのものの性質（運用で変わらない部分）が同じか。 */
+function sameTableDefinition(a: Table, b: Table): boolean {
+  return (
+    a.id === b.id &&
+    a.label === b.label &&
+    a.capacity === b.capacity &&
+    a.adminRank === b.adminRank &&
+    a.enabled === b.enabled &&
+    sameStrings(a.tags, b.tags)
+  );
+}
+
+/** 席の使われ方（運用で変わる部分）が同じか。 */
+function sameTableUsage(a: Table, b: Table): boolean {
+  return (
+    a.status === b.status &&
+    a.statusSince === b.statusSince &&
+    a.verifiedFreeAt === b.verifiedFreeAt &&
+    a.occupantTicketId === b.occupantTicketId &&
+    a.disableAfterCurrent === b.disableAfterCurrent
+  );
+}
+
+/** 2 つのテーブルが同じ内容か。 */
+export function sameTable(a: Table, b: Table): boolean {
+  return sameTableDefinition(a, b) && sameTableUsage(a, b);
+}
+
+function sameTicketIdentity(a: Ticket, b: Ticket): boolean {
+  return (
+    a.id === b.id &&
+    a.code === b.code &&
+    a.partySize === b.partySize &&
+    a.state === b.state &&
+    sameStrings(a.requiredTags, b.requiredTags)
+  );
+}
+
+function sameTicketTimes(a: Ticket, b: Ticket): boolean {
+  return (
+    a.priorityAt === b.priorityAt &&
+    a.createdAt === b.createdAt &&
+    a.calledAt === b.calledAt &&
+    a.holdDeadline === b.holdDeadline &&
+    a.seatedAt === b.seatedAt &&
+    a.endedAt === b.endedAt &&
+    a.pauseDeadline === b.pauseDeadline &&
+    a.pausedTotal === b.pausedTotal &&
+    a.lastSeenAt === b.lastSeenAt &&
+    a.stillHereAskedAt === b.stillHereAskedAt
+  );
+}
+
+function sameTicketCounters(a: Ticket, b: Ticket): boolean {
+  return (
+    a.tableId === b.tableId &&
+    a.extensions === b.extensions &&
+    a.passes === b.passes &&
+    a.noShows === b.noShows &&
+    a.conflictPriority === b.conflictPriority &&
+    a.endReason === b.endReason &&
+    a.hasNotificationChannel === b.hasNotificationChannel
+  );
+}
+
+/** 2 つのチケットが同じ内容か。 */
+export function sameTicket(a: Ticket, b: Ticket): boolean {
+  return sameTicketIdentity(a, b) && sameTicketTimes(a, b) && sameTicketCounters(a, b);
+}
+
+/**
+ * 2 つの状態が同じ内容か。
+ *
+ * `tick` の冪等性（全体プラン 9.12 の 5）と、時間の飛ばし方によらず同じ状態に
+ * 落ち着くこと（PR 12）を確かめるために使う。
+ *
+ * **運用パラメータは参照で比べる。** `apply` と `tick` は設定を作り直さない
+ * （展開すると参照は保たれる）ため、参照が変わっていれば実装の誤りである。
+ * 値で比べるより厳しい判定になるが、厳しい側に外れるぶんには見落としが出ない。
+ */
+export function sameVenueState(a: VenueState, b: VenueState): boolean {
+  return (
+    a.venueId === b.venueId &&
+    a.operating === b.operating &&
+    a.joinOpen === b.joinOpen &&
+    a.nextCodeSeq === b.nextCodeSeq &&
+    a.policy === b.policy &&
+    a.tables.length === b.tables.length &&
+    a.tickets.length === b.tickets.length &&
+    a.tables.every((table, index) => matchesAt(b.tables, index, table, sameTable)) &&
+    a.tickets.every((ticket, index) => matchesAt(b.tickets, index, ticket, sameTicket))
+  );
+}
+
+function matchesAt<T>(
+  list: readonly T[],
+  index: number,
+  value: T,
+  equals: (a: T, b: T) => boolean,
+): boolean {
+  const other = list[index];
+  return other !== undefined && equals(value, other);
+}
