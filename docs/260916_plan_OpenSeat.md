@@ -584,20 +584,23 @@ stateDiagram-v2
     [*] --> WAITING: 受付（入口QR）
     [*] --> SEATED: 飛び込み着席（座席QR・空席・待ちなし）
     WAITING --> CALLED: 割当（空席発生 or 受付時に空席あり）
+    WAITING --> SEATED: 空席の座席QRを読んで前倒し着席（7.8・待ち順序を崩さない条件つき）
     WAITING --> PAUSED: 「呼び出しを保留」（料理待ちなど）
     PAUSED --> WAITING: 「準備OK」
-    PAUSED --> EXPIRED: 保留の上限超過（延長操作なし）
+    PAUSED --> EXPIRED: 保留の上限超過（延長操作なし）／受付からの絶対上限
     CALLED --> SEATED: 座席QR読み取り／コード入力／スタッフ確認
     CALLED --> CALLED: 「向かっています」＋延長（回数制限あり）
+    CALLED --> CALLED: 別の空席へ席を変更（7.8・allow_table_swap）
     CALLED --> PAUSED: 「パス」（順番を保持したまま次の人へ譲る）
     CALLED --> PAUSED: ホールド期限切れ（1回目・no_show_policy=requeue_once）
     CALLED --> NO_SHOW: ホールド期限切れ（2回目 or policy=cancel）
+    CALLED --> WAITING: ホールド期限切れ（policy=requeue_back・末尾へ）
     CALLED --> WAITING: 席が塞がっていた報告（先頭優先で再割当）
-    SEATED --> DONE: 退席（本人操作／スタッフ／自動解放）
-    WAITING --> CANCELLED: 本人キャンセル／スタッフ
-    PAUSED --> CANCELLED: 本人キャンセル／スタッフ
-    CALLED --> CANCELLED: 本人キャンセル／スタッフ
-    WAITING --> EXPIRED: 放置（通知手段なし＆一定時間応答なし）
+    SEATED --> DONE: 退席（本人操作／スタッフ／hard上限の自動解放／全席解放）
+    WAITING --> CANCELLED: 本人キャンセル／スタッフ／施設都合
+    PAUSED --> CANCELLED: 本人キャンセル／スタッフ／施設都合
+    CALLED --> CANCELLED: 本人キャンセル／スタッフ／施設都合
+    WAITING --> EXPIRED: 放置（通知手段なし＆一定時間応答なし）／受付からの絶対上限
     DONE --> [*]
     CANCELLED --> [*]
     NO_SHOW --> [*]
@@ -624,17 +627,25 @@ stateDiagram-v2
     HELD --> OCCUPIED: 着席確認
     HELD --> FREE: ノーショー／パス／キャンセル
     HELD --> OCCUPIED_UNKNOWN: 「誰か座っている」報告
-    FREE --> OCCUPIED: 飛び込み着席（座席QR）
+    FREE --> OCCUPIED: 飛び込み着席／待ちの人の前倒し着席（座席QR）
     FREE --> OCCUPIED_UNKNOWN: 第三者の「使用中」報告／スタッフ
     OCCUPIED --> TURNOVER: 退席
     TURNOVER --> FREE: 片付け猶予経過（既定 0〜1 分）
+    TURNOVER --> DISABLED: 片付け猶予経過＋対象外の予約（disable_after_current）
     OCCUPIED --> NEEDS_CHECK: 上限超過＋猶予／「まだ利用中？」に無応答
     OCCUPIED_UNKNOWN --> NEEDS_CHECK: 想定滞在時間の経過
-    NEEDS_CHECK --> FREE: スタッフ確認／次に案内された人の「空いていた」
+    OCCUPIED_UNKNOWN --> FREE: スタッフが「空席にする」（7.11 の 4 層目）
+    NEEDS_CHECK --> FREE: スタッフ確認／次に案内された人の「空いていた」／放置の自動解放
     NEEDS_CHECK --> OCCUPIED: 本人の「まだ利用中」
     NEEDS_CHECK --> OCCUPIED_UNKNOWN: 次に案内された人の「使用中だった」
     FREE --> DISABLED: 運用終了／設定変更
+    NEEDS_CHECK --> DISABLED: 運用終了
+    HELD --> DISABLED: 全席解放（緊急）
+    OCCUPIED --> DISABLED: 全席解放（緊急）
+    OCCUPIED_UNKNOWN --> DISABLED: 全席解放（緊急）
 ```
+
+**運用終了と全席解放は別の操作である。** 通常の運用終了では、`FREE` と `NEEDS_CHECK` と `TURNOVER` の席をすぐ `DISABLED` にし、利用中の席（`HELD` / `OCCUPIED` / `OCCUPIED_UNKNOWN`）は現在の利用が終わってから外す（`disable_after_current`、7.6）。緊急時の「全席解放」は、利用中かどうかにかかわらずすべての席を `DISABLED` にする。
 
 `NEEDS_CHECK`（確認要）は「たぶん空いているが確証がない」状態で、この状態の扱い（7.11）がゴースト占有対策の要になる。
 

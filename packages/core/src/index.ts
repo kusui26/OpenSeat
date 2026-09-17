@@ -105,3 +105,38 @@ export {
   withTable,
   withTicket,
 } from './domain/state.js';
+
+// ---- 状態機械（Phase 1 PR 2）----
+
+export type { Transition, TransitOutcome, GuardEvaluator } from './machine/transit.js';
+export { matching, transit } from './machine/transit.js';
+
+export {
+  outgoing,
+  incoming,
+  statesIn,
+  reachableFrom,
+  canReachAny,
+  ambiguous,
+  duplicates,
+  guardsUsedIn,
+  eventsUsedIn,
+} from './machine/graph.js';
+
+export type { TicketEvent, TicketGuard, TicketTransition } from './machine/ticket-machine.js';
+export {
+  TICKET_EVENTS,
+  TICKET_GUARDS,
+  TICKET_TRANSITIONS,
+  TICKET_INITIAL_STATES,
+  MAX_AGE_APPLIES_TO,
+} from './machine/ticket-machine.js';
+
+export type { TableEvent, TableGuard, TableTransition } from './machine/table-machine.js';
+export {
+  TABLE_EVENTS,
+  TABLE_GUARDS,
+  TABLE_TRANSITIONS,
+  TABLE_INITIAL_STATE,
+  CLOSE_APPLIES_TO,
+} from './machine/table-machine.js';
