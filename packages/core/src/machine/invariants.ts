@@ -179,21 +179,34 @@ export const heldTableHasDeadline: Invariant<VenueState> = invariant(
  * |---|---|
  * | `CALLED` | `calledAt`、`holdDeadline` |
  * | `SEATED` | `seatedAt` |
- * | `PAUSED` | `pauseDeadline` |
+ * | `PAUSED` | `pauseDeadline`、`pausedSince` |
  * | 終端 | `endedAt`、`endReason` |
+ *
+ * `pausedSince` は逆向きにも見る。**`PAUSED` 以外では空であること。** 保留から
+ * 出るときに消し忘れると、次に保留へ入ったときに `pausedTotal` が二重に
+ * 積み上がり、`pauseMaxTotalMin` が実際より早く尽きる。
  */
 export const stateTimestampsAreSet: Invariant<VenueState> = invariant(
   'state_timestamps_are_set',
-  '状態に応じた時刻と終わり方が埋まっている',
+  '状態に応じた時刻と終わり方が埋まっており、保留の起点は PAUSED のときだけ入る',
   (state) => state.tickets.every(hasRequiredTimestamps),
 );
 
 function hasRequiredTimestamps(ticket: Ticket): boolean {
+  return hasStateTimestamps(ticket) && pauseStartIsScoped(ticket);
+}
+
+function hasStateTimestamps(ticket: Ticket): boolean {
   if (ticket.state === 'CALLED') return ticket.calledAt !== null && ticket.holdDeadline !== null;
   if (ticket.state === 'SEATED') return ticket.seatedAt !== null;
-  if (ticket.state === 'PAUSED') return ticket.pauseDeadline !== null;
+  if (ticket.state === 'PAUSED') return ticket.pauseDeadline !== null && ticket.pausedSince !== null;
   if (isTerminal(ticket.state)) return ticket.endedAt !== null && ticket.endReason !== null;
   return true;
+}
+
+/** 保留の起点は `PAUSED` のあいだだけ入っている。 */
+function pauseStartIsScoped(ticket: Ticket): boolean {
+  return ticket.state === 'PAUSED' || ticket.pausedSince === null;
 }
 
 /**

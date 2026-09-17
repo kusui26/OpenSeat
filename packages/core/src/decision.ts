@@ -5,6 +5,7 @@
  * 新しい状態と、発生したイベントを返す（ADR-0004）。
  */
 
+import type { Result } from './result.js';
 import type { Timestamp } from './time.js';
 
 /** 状態変化の結果。状態を破壊的に更新せず、新しい状態を返す。 */
@@ -13,12 +14,20 @@ export interface Decision<State, Event> {
   readonly events: readonly Event[];
 }
 
-/** コマンドの適用。呼び出し側は結果を永続化してからイベントを配信する。 */
-export type Apply<State, Command, Event> = (
+/**
+ * コマンドの適用。呼び出し側は結果を永続化してからイベントを配信する。
+ *
+ * **拒否されうる。** 定員を超える人数、受付時間外、その状態では起こせない操作は、
+ * 例外ではなく `Result` の失敗側で返す（Phase 1 プラン 7.3）。呼び出し側は拒否を
+ * 読まずに状態を取り出せない。
+ *
+ * `tick` には失敗が無い。時刻が進むことは拒否できないため（`Tick` を参照）。
+ */
+export type Apply<State, Command, Event, Failure> = (
   state: State,
   command: Command,
   now: Timestamp,
-) => Decision<State, Event>;
+) => Result<Decision<State, Event>, Failure>;
 
 /**
  * 時刻起因の遷移。ホールド期限・リマインド・保留期限・上限超過を、

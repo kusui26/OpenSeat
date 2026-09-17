@@ -46,7 +46,7 @@ function healthy(): VenueState {
     ],
     [
       tkt('tk-waiting', 6),
-      tkt('tk-paused', 2, { state: 'PAUSED', pauseDeadline: NOW + minutes(10) }),
+      tkt('tk-paused', 2, { state: 'PAUSED', pauseDeadline: NOW + minutes(10), pausedSince: NOW }),
       tkt('tk-called', 3, {
         state: 'CALLED',
         tableId: 'tb-held',
@@ -303,6 +303,7 @@ describe('state_timestamps_are_set', () => {
     ['CALLED', 'tk-called', { calledAt: null }],
     ['SEATED', 'tk-seated', { seatedAt: null }],
     ['PAUSED', 'tk-paused', { pauseDeadline: null }],
+    ['PAUSED', 'tk-paused', { pausedSince: null }],
     ['終端', 'tk-done', { endedAt: null }],
   ])('%s で必要な時刻が欠けていたら落ちる', (_label, id, patch) => {
     const base = healthy();
@@ -315,6 +316,14 @@ describe('state_timestamps_are_set', () => {
 
   it('WAITING には時刻の要求が無い', () => {
     expectHealthy(healthy());
+  });
+
+  it('保留の起点が PAUSED 以外に残っていたら落ちる', () => {
+    const base = healthy();
+    const broken = base.tickets.map((ticket) =>
+      ticket.id === 'tk-waiting' ? { ...ticket, pausedSince: NOW } : ticket,
+    );
+    expectOnlyViolated(venue(base.tables, broken), 'state_timestamps_are_set');
   });
 });
 
@@ -385,7 +394,13 @@ describe('priority_preserved_across_pause', () => {
       before.tables,
       before.tickets.map((ticket) =>
         ticket.id === 'tk-waiting'
-          ? { ...ticket, state: 'PAUSED' as const, pauseDeadline: NOW + minutes(10), priorityAt }
+          ? {
+              ...ticket,
+              state: 'PAUSED' as const,
+              pauseDeadline: NOW + minutes(10),
+              pausedSince: NOW,
+              priorityAt,
+            }
           : ticket,
       ),
     );

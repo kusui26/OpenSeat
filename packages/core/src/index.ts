@@ -21,6 +21,9 @@ export {
   elapsedSince,
 } from './time.js';
 
+export type { Result } from './result.js';
+export { ok, err, isOk, isErr } from './result.js';
+
 export type { Decision, Apply, Tick } from './decision.js';
 export { unchanged, decided, sequence } from './decision.js';
 
@@ -90,7 +93,7 @@ export {
   validatePolicy,
 } from './domain/policy.js';
 
-export type { VenueState, CreateVenueStateParams } from './domain/state.js';
+export type { VenueState, CreateVenueStateParams, CodeAllocation } from './domain/state.js';
 export {
   CODE_SPACE_SIZE,
   createVenueState,
@@ -101,6 +104,8 @@ export {
   managedTables,
   ticketCodeFor,
   nextTicketCode,
+  allocateTicketCode,
+  queuedTickets,
   effectiveMaxPartySize,
   withTable,
   withTicket,
@@ -133,6 +138,8 @@ export {
   TICKET_TRANSITIONS,
   TICKET_INITIAL_STATES,
   MAX_AGE_APPLIES_TO,
+  HEARTBEAT_APPLIES_TO,
+  PARTY_SIZE_CHANGE_APPLIES_TO,
 } from './machine/ticket-machine.js';
 
 export type { TableEvent, TableGuard, TableTransition } from './machine/table-machine.js';
@@ -169,7 +176,7 @@ export {
 
 // ---- 割当の選択（Phase 1 PR 4）----
 
-export type { Assignment, AssignmentReason, Pick } from './allocation/choose.js';
+export type { Assignment, AssignmentReason, CandidatePick } from './allocation/choose.js';
 export {
   ASSIGNMENT_REASONS,
   orderTables,
@@ -179,3 +186,52 @@ export {
   pickCandidate,
   chooseAssignments,
 } from './allocation/choose.js';
+
+// ---- コマンドの適用（Phase 1 PR 5）----
+
+export type {
+  Command,
+  CommandType,
+  Actor,
+  CancelReason,
+  JoinCommand,
+  CancelCommand,
+  PauseCommand,
+  ReadyCommand,
+  ChangePartySizeCommand,
+  HeartbeatCommand,
+} from './machine/command.js';
+export { ACTORS, CANCEL_REASONS, CANCEL_END_REASONS, COMMAND_TYPES } from './machine/command.js';
+
+export type { Rejection, RejectionCode } from './machine/rejection.js';
+export { REJECTION_CODES, rejection, isDefect } from './machine/rejection.js';
+
+export type {
+  DomainEvent,
+  DomainEventType,
+  TicketJoined,
+  TicketPaused,
+  TicketResumed,
+  TicketCancelled,
+  PartySizeChanged,
+  TableFreed,
+} from './machine/events.js';
+export { DOMAIN_EVENT_TYPES } from './machine/events.js';
+
+export type { TicketGuardContext, TableGuardContext } from './machine/guards.js';
+export {
+  ticketGuardIsImplemented,
+  tableGuardIsImplemented,
+  unimplementedTicketGuards,
+  unimplementedTableGuards,
+  evaluateTicketGuard,
+  evaluateTableGuard,
+} from './machine/guards.js';
+
+export {
+  apply,
+  ticketTransition,
+  tableTransition,
+  remainingPauseBudget,
+  pauseDeadlineFor,
+} from './machine/apply.js';

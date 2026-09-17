@@ -9,7 +9,7 @@
  * 宣言されたガードがすべて実装されていることは PR 12 で閉じる。
  */
 
-import type { TicketState } from '../domain/ticket.js';
+import { ACTIVE_TICKET_STATES, type TicketState } from '../domain/ticket.js';
 import type { Transition } from './transit.js';
 
 /**
@@ -158,6 +158,14 @@ export const TICKET_TRANSITIONS = [
     guard: null,
     source: '7.7',
     note: '「準備OK」で呼び出しの対象に戻った',
+  },
+  {
+    from: 'PAUSED',
+    on: 'EXTEND',
+    to: 'PAUSED',
+    guard: null,
+    source: '7.7',
+    note: '「まだ待っていますか」に応えて保留の期限を延ばした。合計の上限までしか延びない',
   },
   {
     from: 'PAUSED',
@@ -311,3 +319,26 @@ export const TICKET_TRANSITIONS = [
  * 幽霊チケットにはならない。
  */
 export const MAX_AGE_APPLIES_TO: readonly TicketState[] = ['WAITING', 'PAUSED'];
+
+// ---- 状態を変えないコマンドの適用範囲 ----
+//
+// **遷移表には入れない。** 表は状態が変わる矢印だけを語る。心拍と人数の変更は
+// 状態を変えず、チケットの欄だけを書き換える。それでも「どの状態で受け付けるか」は
+// 分岐ではなくデータとして宣言する（CLAUDE.md 3.2）。`MAX_AGE_APPLIES_TO` と
+// 同じ形にしてある。
+
+/**
+ * 心拍（利用者の画面が生きていることの通知）を受け付ける状態。
+ *
+ * 生きているチケットすべて。終端に達したチケットの `lastSeenAt` には意味が無い。
+ */
+export const HEARTBEAT_APPLIES_TO: readonly TicketState[] = [...ACTIVE_TICKET_STATES];
+
+/**
+ * 人数を変更できる状態（全体プラン 7.6「人数の変更（待ち中）」）。
+ *
+ * 待っている間だけ。`CALLED` と `SEATED` を含めないのは、席がすでにその人数向けに
+ * 確保されているためである。増やせば定員を超え、`assigned_party_fits_capacity` が
+ * 破れる。席を持ったまま人数を変えたい人は、いったん譲るか取り消す。
+ */
+export const PARTY_SIZE_CHANGE_APPLIES_TO: readonly TicketState[] = ['WAITING', 'PAUSED'];
