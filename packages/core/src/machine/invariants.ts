@@ -182,18 +182,19 @@ export const heldTableHasDeadline: Invariant<VenueState> = invariant(
  * | `PAUSED` | `pauseDeadline`、`pausedSince` |
  * | 終端 | `endedAt`、`endReason` |
  *
- * `pausedSince` は逆向きにも見る。**`PAUSED` 以外では空であること。** 保留から
- * 出るときに消し忘れると、次に保留へ入ったときに `pausedTotal` が二重に
- * 積み上がり、`pauseMaxTotalMin` が実際より早く尽きる。
+ * `pausedSince` と `holdRemindedAt` は逆向きにも見る。**その状態以外では空で
+ * あること。** `pausedSince` を保留から出るときに消し忘れると、次に保留へ
+ * 入ったときに `pausedTotal` が二重に積み上がり、`pauseMaxTotalMin` が実際より
+ * 早く尽きる。`holdRemindedAt` を消し忘れると、次の呼び出しで知らせが出ない。
  */
 export const stateTimestampsAreSet: Invariant<VenueState> = invariant(
   'state_timestamps_are_set',
-  '状態に応じた時刻と終わり方が埋まっており、保留の起点は PAUSED のときだけ入る',
+  '状態に応じた時刻と終わり方が埋まっており、保留の起点と呼び出しの知らせはその状態のときだけ入る',
   (state) => state.tickets.every(hasRequiredTimestamps),
 );
 
 function hasRequiredTimestamps(ticket: Ticket): boolean {
-  return hasStateTimestamps(ticket) && pauseStartIsScoped(ticket);
+  return hasStateTimestamps(ticket) && pauseStartIsScoped(ticket) && reminderIsScoped(ticket);
 }
 
 function hasStateTimestamps(ticket: Ticket): boolean {
@@ -207,6 +208,11 @@ function hasStateTimestamps(ticket: Ticket): boolean {
 /** 保留の起点は `PAUSED` のあいだだけ入っている。 */
 function pauseStartIsScoped(ticket: Ticket): boolean {
   return ticket.state === 'PAUSED' || ticket.pausedSince === null;
+}
+
+/** ホールドの知らせの記録は `CALLED` のあいだだけ入っている。 */
+function reminderIsScoped(ticket: Ticket): boolean {
+  return ticket.state === 'CALLED' || ticket.holdRemindedAt === null;
 }
 
 /**

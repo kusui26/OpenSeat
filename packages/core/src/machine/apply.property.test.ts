@@ -6,7 +6,8 @@ import { createTicket, type Ticket, type TicketState } from '../domain/ticket.js
 import { createVenueState, findTicket, sameVenueState, type VenueState } from '../domain/state.js';
 import { checkInvariants, checkTransition } from '../invariant.js';
 import { minutes, seconds, type Timestamp } from '../time.js';
-import { apply, remainingPauseBudget } from './apply.js';
+import { apply } from './apply.js';
+import { remainingPauseBudget } from './deadlines.js';
 import { COMMAND_TYPES, type Actor, type CancelReason, type Command, type CommandType } from './command.js';
 import type { DomainEvent } from './events.js';
 import { STATE_INVARIANTS, priorityPreservedAcrossPause } from './invariants.js';
@@ -106,6 +107,8 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .map((fields): Command => ({ type: 'CANCEL', ...fields })),
   ticketIdArb.map((ticketId): Command => ({ type: 'PAUSE', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'READY', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'PASS', ticketId })),
   fc
     .record({ ticketId: ticketIdArb, partySize: fc.integer({ min: 0, max: 6 }) })
     .map((fields): Command => ({ type: 'CHANGE_PARTY_SIZE', ...fields })),
@@ -221,13 +224,29 @@ describe('apply が決して破らないこと', () => {
     );
   });
 
-  it('チケットの状態が動いたなら、その遷移は表に宣言されている', () => {
+  /**
+   * **1 回の `apply` は、1 枚のチケットを最大 2 歩動かす。**
+   *
+   * コマンドの分と、そのあとに必ず走る割当の分である。たとえば「準備OK」は
+   * `PAUSED → WAITING` と動かし、続く割当が空席を見つければ `WAITING → CALLED`
+   * まで進む。前後の状態だけを見ると `PAUSED → CALLED` という表に無い遷移に
+   * 見えるが、実際には宣言された 2 本を続けて通っている。
+   *
+   * ここを緩めて「到達できればよい」にすると検査が効かなくなるので、
+   * **割当の一歩は `TicketCalled` が出ていることで見分け**、コマンドの一歩を
+   * 表と突き合わせる。
+   */
+  it('チケットの状態が動いたなら、コマンドの一歩も割当の一歩も表に宣言されている', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, commands }) =>
         run(state, commands).every(everyMoveIsDeclared),
       ),
       RUNS,
     );
+  });
+
+  it('割当が使う一歩（WAITING → CALLED）は表に宣言されている', () => {
+    expect(declaredMove('WAITING', 'CALLED')).toBe(true);
   });
 
   it('状態機械が動いたなら、必ずイベントが 1 つ以上出る', () => {
@@ -270,11 +289,11 @@ describe('apply が決して破らないこと', () => {
 });
 
 describe('受付が守ること（7.5）', () => {
-  it('受け付けられた人は必ず WAITING から始まる', () => {
+  it('受け付けられた人は、待ちに入るか、その場で呼び出される（7.5 の 4）', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, commands }) =>
         run(state, commands).every(
-          (step) => step.command.type !== 'JOIN' || joinedTicketIsWaiting(step),
+          (step) => step.command.type !== 'JOIN' || joinedTicketIsQueued(step),
         ),
       ),
       RUNS,
@@ -352,18 +371,30 @@ describe('保留が守ること（7.7 の 7）', () => {
 
 // ---- 判定の助け ----
 
+function declaredMove(from: TicketState, to: TicketState): boolean {
+  return TICKET_TRANSITIONS.some((row) => row.from === from && row.to === to);
+}
+
 function everyMoveIsDeclared(step: Step): boolean {
   const before = ticketStates(step.before);
+  const calledHere: ReadonlySet<string> = new Set(
+    step.events.filter((event) => event.type === 'TicketCalled').map((event) => event.ticketId),
+  );
   return step.after.tickets.every((ticket) => {
     const from = before.get(ticket.id);
-    if (from === undefined || from === ticket.state) return true;
-    return TICKET_TRANSITIONS.some((row) => row.from === from && row.to === ticket.state);
+    if (from === undefined) return true; // この手で生まれたチケット
+    if (!calledHere.has(ticket.id)) return from === ticket.state || declaredMove(from, ticket.state);
+
+    // 割当で呼ばれた人は、最後の一歩が WAITING → CALLED だったはず。
+    if (ticket.state !== 'CALLED') return false;
+    return from === 'WAITING' || declaredMove(from, 'WAITING');
   });
 }
 
-function joinedTicketIsWaiting(step: Step): boolean {
+function joinedTicketIsQueued(step: Step): boolean {
   if (step.command.type !== 'JOIN') return true;
-  return findTicket(step.after, step.command.ticketId)?.state === 'WAITING';
+  const joined = findTicket(step.after, step.command.ticketId);
+  return joined !== undefined && (joined.state === 'WAITING' || joined.state === 'CALLED');
 }
 
 function queuedAtStart(state: VenueState): number {

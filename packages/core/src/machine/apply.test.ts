@@ -6,13 +6,9 @@ import { createTicket, type Ticket, type TicketState } from '../domain/ticket.js
 import { createVenueState, findTable, findTicket, type VenueState } from '../domain/state.js';
 import type { Result } from '../result.js';
 import { minutes, type Timestamp } from '../time.js';
-import {
-  apply,
-  pauseDeadlineFor,
-  remainingPauseBudget,
-  tableTransition,
-  ticketTransition,
-} from './apply.js';
+import { apply } from './apply.js';
+import { pauseDeadlineFor, remainingPauseBudget } from './deadlines.js';
+import { tableTransition, ticketTransition } from './transition.js';
 import type { Command } from './command.js';
 import type { DomainEvent } from './events.js';
 import type { Rejection, RejectionCode } from './rejection.js';
@@ -28,7 +24,7 @@ function table(id: string, capacity: number, overrides: Partial<Table> = {}): Ta
   return { ...createTable({ id, label: id, capacity, now: NOW }), status: 'FREE', ...overrides };
 }
 
-/** 運用中で受付を開いている施設。席は 2 名・4 名の 2 卓。 */
+/** 運用中で受付を開いている施設。席は 2 名・4 名の 2 卓で、どちらも空いている。 */
 function venue(overrides: Partial<VenueState> = {}, policy: Policy = DEFAULT_POLICY): VenueState {
   const base = createVenueState({
     venueId: 'v1',
@@ -36,6 +32,21 @@ function venue(overrides: Partial<VenueState> = {}, policy: Policy = DEFAULT_POL
     tables: [table('tb-2', 2), table('tb-4', 4)],
   });
   return { ...base, operating: true, joinOpen: true, ...overrides };
+}
+
+/**
+ * 空席が 1 つも無い施設。受け付けた人は待ちに入る。
+ *
+ * `apply` は毎回割当を実行するので、空席がある施設で受け付けると即座に
+ * 呼び出されてしまう（7.5 の 4）。待っている状態を作りたいテストはこちらを使う。
+ * 席は残しておくので、受け付けられる最大人数（4 名）は変わらない。
+ */
+function waiting(overrides: Partial<VenueState> = {}, policy: Policy = DEFAULT_POLICY): VenueState {
+  const base = venue(overrides, policy);
+  return {
+    ...base,
+    tables: base.tables.map((item) => ({ ...item, status: 'OCCUPIED_UNKNOWN' as const })),
+  };
 }
 
 function expectOk(result: Result<Decision<VenueState, DomainEvent>, Rejection>): Decision<VenueState, DomainEvent> {
@@ -115,14 +126,14 @@ describe('apply の骨格', () => {
   });
 
   it('拒否されたとき、渡した状態は一切変わらない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const snapshot = structuredClone(state);
     expectRejected(apply(state, { type: 'PAUSE', ticketId: 'missing' }, NOW), 'TICKET_NOT_FOUND');
     expect(state).toEqual(snapshot);
   });
 
   it('成功したとき、渡した状態は一切変わらない（新しい状態を返す）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const snapshot = structuredClone(state);
     const next = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, NOW)).state;
     expect(state).toEqual(snapshot);
@@ -137,7 +148,7 @@ describe('apply の骨格', () => {
 
   it('出口の不変条件の検査は飛ばせない。壊れた状態にはどのコマンドも通らない', () => {
     // 同じ ID のチケットが 2 枚ある状態。unique_ids が破れている。
-    const base = join(venue(), 'k1', 2);
+    const base = join(waiting(), 'k1', 2);
     const broken: VenueState = { ...base, tickets: [...base.tickets, ...base.tickets] };
     const failure = expectRejected(
       apply(broken, { type: 'HEARTBEAT', ticketId: 'k1' }, at(1)),
@@ -147,46 +158,109 @@ describe('apply の骨格', () => {
   });
 
   it('壊れた状態を渡しても、壊れた状態が書き戻されることはない', () => {
-    const base = join(venue(), 'k1', 2);
+    const base = join(waiting(), 'k1', 2);
     const broken: VenueState = { ...base, tickets: [...base.tickets, ...base.tickets] };
     const result = apply(broken, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(1));
     expect(result.ok).toBe(false);
   });
 });
 
+describe('割当の実行（手順 5）', () => {
+  /**
+   * **どのコマンドのあとにも割当が走る。**
+   *
+   * コマンドごとに呼び分けると、どれかで忘れる。忘れた症状は「空席があるのに
+   * 誰も呼ばれない」で、次の操作で勝手に直るため気づきにくい。
+   */
+  it('状態を変えないコマンドのあとでも、噛み合っていれば呼び出しが起きる', () => {
+    const stuck = join(waiting(), 'k1', 2);
+    // 席が空いたのに誰も呼ばれていない状態を手で作る。
+    const freed: VenueState = {
+      ...stuck,
+      tables: stuck.tables.map((item) => ({ ...item, status: 'FREE' as const })),
+    };
+    const decided = expectOk(apply(freed, { type: 'HEARTBEAT', ticketId: 'k1' }, at(1)));
+    expect(ticketOf(decided.state, 'k1').state).toBe('CALLED');
+    expect(decided.events.map((event) => event.type)).toEqual(['TicketCalled', 'TableHeld']);
+  });
+
+  it('噛み合う空席と待ちが無ければ、何も起きない', () => {
+    const state = join(waiting(), 'k1', 2);
+    expect(expectOk(apply(state, { type: 'HEARTBEAT', ticketId: 'k1' }, at(1))).events).toEqual([]);
+  });
+
+  /**
+   * PR 3 で「割当の直後にしか成立しない」として常時検査から外した `no_starvation` が、
+   * 割当を毎回通すようになったことで出口の検査に戻る。
+   */
+  it('出口では「収まる空席があるのに待ちが残らない」も検査される', () => {
+    const state = join(waiting(), 'k1', 2);
+    const freed: VenueState = {
+      ...state,
+      tables: state.tables.map((item) => ({ ...item, status: 'FREE' as const })),
+    };
+    const next = expectOk(apply(freed, { type: 'HEARTBEAT', ticketId: 'k1' }, at(1))).state;
+    const stillWaiting = next.tickets.filter((item) => item.state === 'WAITING');
+    expect(stillWaiting).toEqual([]);
+  });
+
+  it('人数が合わない空席があっても、待っている人はそのまま', () => {
+    const big = join(waiting(), 'k1', 4);
+    const onlySmall: VenueState = {
+      ...big,
+      tables: big.tables.map((item) =>
+        item.id === 'tb-2' ? { ...item, status: 'FREE' as const } : item,
+      ),
+    };
+    const next = expectOk(apply(onlySmall, { type: 'HEARTBEAT', ticketId: 'k1' }, at(1))).state;
+    expect(ticketOf(next, 'k1').state).toBe('WAITING');
+  });
+});
+
 describe('遷移の段（手順 2・3）', () => {
-  const state = join(venue(), 'k1', 2);
-  const waiting = ticketOf(state, 'k1');
+  const state = join(waiting(), 'k1', 2);
+  const queued = ticketOf(state, 'k1');
 
   it('表にある無条件の遷移は通る', () => {
-    const moved = ticketTransition(state, waiting, 'PAUSE', NOW);
+    const moved = ticketTransition({ state, ticket: queued, now: NOW, table: null }, 'PAUSE');
     expect(moved.ok && moved.value).toBe('PAUSED');
   });
 
   it('表に無い組み合わせは NOT_ALLOWED_IN_STATE で拒否される', () => {
-    const moved = ticketTransition(state, waiting, 'CHECK_OUT', NOW);
+    const moved = ticketTransition({ state, ticket: queued, now: NOW, table: null }, 'CHECK_OUT');
     expect(moved.ok).toBe(false);
     if (!moved.ok) expect(moved.error.code).toBe('NOT_ALLOWED_IN_STATE');
   });
 
   it('判定がまだ書かれていないガードは、通らずに GUARD_NOT_IMPLEMENTED になる', () => {
     const held = ticketOf(called(state, 'k1', 'tb-2'), 'k1');
-    const moved = ticketTransition(state, held, 'EXTEND', NOW);
+    const moved = ticketTransition({ state, ticket: held, now: NOW, table: null }, 'CHECK_IN');
     expect(moved.ok).toBe(false);
     if (!moved.ok) {
       expect(moved.error.code).toBe('GUARD_NOT_IMPLEMENTED');
+      expect(moved.error.describe).toContain('isAssignedTable');
+    }
+  });
+
+  it('実装済みのガードが成立しなければ BLOCKED_BY_GUARD になる', () => {
+    const base = called(state, 'k1', 'tb-2');
+    const usedUp: Ticket = { ...ticketOf(base, 'k1'), extensions: DEFAULT_POLICY.maxExtensions };
+    const moved = ticketTransition({ state: base, ticket: usedUp, now: NOW, table: null }, 'EXTEND');
+    expect(moved.ok).toBe(false);
+    if (!moved.ok) {
+      expect(moved.error.code).toBe('BLOCKED_BY_GUARD');
       expect(moved.error.describe).toContain('underExtensionLimit');
     }
   });
 
   it('席の遷移も同じ手順を通る', () => {
     const held = called(state, 'k1', 'tb-2');
-    const moved = tableTransition(held, tableOf(held, 'tb-2'), 'RELEASE', NOW);
+    const moved = tableTransition({ state: held, table: tableOf(held, 'tb-2'), now: NOW }, 'RELEASE');
     expect(moved.ok && moved.value).toBe('FREE');
   });
 
   it('席の表に無い組み合わせも拒否される', () => {
-    const moved = tableTransition(state, tableOf(state, 'tb-2'), 'CHECK_OUT', NOW);
+    const moved = tableTransition({ state, table: tableOf(state, 'tb-2'), now: NOW }, 'CHECK_OUT');
     expect(moved.ok).toBe(false);
     if (!moved.ok) expect(moved.error.code).toBe('NOT_ALLOWED_IN_STATE');
   });
@@ -195,10 +269,10 @@ describe('遷移の段（手順 2・3）', () => {
 // ---------------------------------------------------------------------------
 
 describe('受付（7.5）', () => {
-  it('受け付けると WAITING のチケットが 1 枚できる', () => {
+  it('空席が無ければ、受け付けると WAITING のチケットが 1 枚できる', () => {
     const decided = expectOk(
       apply(
-        venue(),
+        waiting(),
         { type: 'JOIN', ticketId: 'k1', partySize: 3, requiredTags: [], hasNotificationChannel: false },
         NOW,
       ),
@@ -211,20 +285,20 @@ describe('受付（7.5）', () => {
   });
 
   it('表示コードが採番され、カウンタが 1 つ進む', () => {
-    const next = join(venue(), 'k1', 2);
+    const next = join(waiting(), 'k1', 2);
     expect(ticketOf(next, 'k1').code).toBe('A-01');
     expect(next.nextCodeSeq).toBe(1);
   });
 
   it('続けて受け付けると別のコードになる', () => {
-    const next = join(join(venue(), 'k1', 2), 'k2', 2, at(1));
+    const next = join(join(waiting(), 'k1', 2), 'k2', 2, at(1));
     expect(ticketOf(next, 'k2').code).toBe('A-02');
   });
 
   it('受付のイベントを出す', () => {
     const decided = expectOk(
       apply(
-        venue(),
+        waiting(),
         { type: 'JOIN', ticketId: 'k1', partySize: 2, requiredTags: [], hasNotificationChannel: false },
         NOW,
       ),
@@ -235,7 +309,7 @@ describe('受付（7.5）', () => {
   });
 
   it('希望タグと通知手段はそのまま記録される', () => {
-    const next = join(venue(), 'k1', 2, NOW, {
+    const next = join(waiting(), 'k1', 2, NOW, {
       requiredTags: ['wheelchair'],
       hasNotificationChannel: true,
     });
@@ -244,14 +318,36 @@ describe('受付（7.5）', () => {
     expect(ticket.hasNotificationChannel).toBe(true);
   });
 
-  it('この PR では受付だけで、呼び出しは起きない（割当の実行は PR 6）', () => {
-    const next = join(venue(), 'k1', 2);
+  it('空席が無ければ待ちに入り、席は変わらない', () => {
+    const next = join(waiting(), 'k1', 2);
     expect(ticketOf(next, 'k1').state).toBe('WAITING');
-    expect(tableOf(next, 'tb-2').status).toBe('FREE');
+    expect(tableOf(next, 'tb-2').status).toBe('OCCUPIED_UNKNOWN');
+  });
+
+  it('空席があれば、受け付けと同時に呼び出される（7.5 の 4）', () => {
+    const next = join(venue(), 'k1', 2);
+    expect(ticketOf(next, 'k1').state).toBe('CALLED');
+    expect(ticketOf(next, 'k1').tableId).toBe('tb-2');
+    expect(tableOf(next, 'tb-2').status).toBe('HELD');
+  });
+
+  it('受付と同時に呼び出されたときは、受付と呼び出しの両方のイベントが出る', () => {
+    const decided = expectOk(
+      apply(
+        venue(),
+        { type: 'JOIN', ticketId: 'k1', partySize: 2, requiredTags: [], hasNotificationChannel: false },
+        NOW,
+      ),
+    );
+    expect(decided.events.map((event) => event.type)).toEqual([
+      'TicketJoined',
+      'TicketCalled',
+      'TableHeld',
+    ]);
   });
 
   it('同じ ID で二度受け付けようとすると拒否される', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expectRejected(
       apply(
         state,
@@ -330,7 +426,7 @@ describe('受付の検証 — 受付の開閉と待ちの上限（7.5 の 1）',
 
   it('待ちが上限に達していれば拒否される', () => {
     const policy: Policy = { ...DEFAULT_POLICY, maxQueueLength: 2 };
-    const full = join(join(venue({}, policy), 'k1', 2), 'k2', 2, at(1));
+    const full = join(join(waiting({}, policy), 'k1', 2), 'k2', 2, at(1));
     expectRejected(
       apply(
         full,
@@ -343,7 +439,7 @@ describe('受付の検証 — 受付の開閉と待ちの上限（7.5 の 1）',
 
   it('上限の 1 つ手前までは受け付ける（境界）', () => {
     const policy: Policy = { ...DEFAULT_POLICY, maxQueueLength: 2 };
-    const state = join(venue({}, policy), 'k1', 2);
+    const state = join(waiting({}, policy), 'k1', 2);
     expect(
       apply(
         state,
@@ -355,7 +451,7 @@ describe('受付の検証 — 受付の開閉と待ちの上限（7.5 の 1）',
 
   it('取り消した人は行列から外れるので、また受け付けられる', () => {
     const policy: Policy = { ...DEFAULT_POLICY, maxQueueLength: 1 };
-    const state = join(venue({}, policy), 'k1', 2);
+    const state = join(waiting({}, policy), 'k1', 2);
     const cancelled = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: 'leaving' }, at(1)),
     ).state;
@@ -381,7 +477,7 @@ describe('受付の検証 — 受付の開閉と待ちの上限（7.5 の 1）',
   });
 
   it('同じ ID の再送は、受付を閉じたあとでも「すでにある」と返る', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const closed: VenueState = { ...state, joinOpen: false };
     expectRejected(
       apply(
@@ -398,7 +494,7 @@ describe('受付の検証 — 受付の開閉と待ちの上限（7.5 の 1）',
 
 describe('取り消し（7.9）', () => {
   it('WAITING から取り消せる', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const next = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: 'found_seat' }, at(3)),
     ).state;
@@ -410,7 +506,7 @@ describe('取り消し（7.9）', () => {
 
   it('PAUSED から取り消せる', () => {
     const paused = expectOk(
-      apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1)),
+      apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1)),
     ).state;
     const next = expectOk(
       apply(paused, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(4)),
@@ -419,7 +515,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('PAUSED から取り消すと、保留していた時間が合計に足される', () => {
-    const paused = expectOk(apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, NOW)).state;
+    const paused = expectOk(apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, NOW)).state;
     const next = expectOk(
       apply(paused, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(6)),
     ).state;
@@ -429,7 +525,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('CALLED から取り消すと、席が即座に空席へ戻る', () => {
-    const held = called(join(venue(), 'k1', 2), 'k1', 'tb-2', at(2));
+    const held = called(join(waiting(), 'k1', 2), 'k1', 'tb-2', at(2));
     const decided = expectOk(
       apply(held, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: 'too_long' }, at(3)),
     );
@@ -438,16 +534,16 @@ describe('取り消し（7.9）', () => {
     expect(ticketOf(decided.state, 'k1').tableId).toBeNull();
   });
 
-  it('CALLED からの取り消しは、席が空いたことをイベントで知らせる', () => {
-    const held = called(join(venue(), 'k1', 2), 'k1', 'tb-2', at(2));
+  it('CALLED からの取り消しは、終了と席の解放をイベントで知らせる', () => {
+    const held = called(join(waiting(), 'k1', 2), 'k1', 'tb-2', at(2));
     const decided = expectOk(
       apply(held, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(3)),
     );
-    expect(decided.events.map((event) => event.type)).toEqual(['TicketCancelled', 'TableFreed']);
+    expect(decided.events.map((event) => event.type)).toEqual(['TicketEnded', 'TableFreed']);
   });
 
   it('席を空けても verifiedFreeAt は更新しない（誰も座っていないので確度は変わらない）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const held = called(state, 'k1', 'tb-2', at(2));
     const before = tableOf(held, 'tb-2').verifiedFreeAt;
     const next = expectOk(
@@ -457,7 +553,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('SEATED からは取り消せない（着席後は退席で扱う）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const seated: VenueState = {
       ...state,
       tickets: state.tickets.map((item) => ({
@@ -477,7 +573,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('終端に達したチケットは二度取り消せない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const cancelled = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(1)),
     ).state;
@@ -488,7 +584,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('スタッフの取り消しは staff_cancel として記録される', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const next = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'staff', reason: 'other' }, at(1)),
     ).state;
@@ -496,7 +592,7 @@ describe('取り消し（7.9）', () => {
   });
 
   it('スタッフの取り消しに理由が無ければ拒否される（監査のため）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expectRejected(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'staff', reason: null }, at(1)),
       'REASON_REQUIRED',
@@ -504,16 +600,16 @@ describe('取り消し（7.9）', () => {
   });
 
   it('本人の取り消しは理由が無くてもよい（任意選択）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expect(apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(1)).ok).toBe(true);
   });
 
   it('選んだ理由はイベントに残る（統計に使う）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const decided = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: 'found_seat' }, at(1)),
     );
-    expect(decided.events[0]).toMatchObject({ type: 'TicketCancelled', reason: 'found_seat' });
+    expect(decided.events[0]).toMatchObject({ type: 'TicketEnded', cancelReason: 'found_seat' });
   });
 
   it('存在しないチケットは取り消せない', () => {
@@ -528,7 +624,7 @@ describe('取り消し（7.9）', () => {
 
 describe('保留と準備OK（7.7 の 5〜7）', () => {
   it('保留に入ると PAUSED になり、期限が付く', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const decided = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(2)));
     const ticket = ticketOf(decided.state, 'k1');
     expect(ticket.state).toBe('PAUSED');
@@ -537,22 +633,22 @@ describe('保留と準備OK（7.7 の 5〜7）', () => {
   });
 
   it('保留のイベントは期限を伝える（画面の残り時間の元になる）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const decided = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(2)));
     expect(decided.events).toEqual([
-      { type: 'TicketPaused', at: at(2), ticketId: 'k1', until: at(12) },
+      { type: 'TicketPaused', at: at(2), ticketId: 'k1', until: at(12), reason: 'user_pause' },
     ]);
   });
 
   it('準備OKで WAITING に戻る', () => {
-    const paused = expectOk(apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
+    const paused = expectOk(apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
     const decided = expectOk(apply(paused, { type: 'READY', ticketId: 'k1' }, at(5)));
     expect(ticketOf(decided.state, 'k1').state).toBe('WAITING');
     expect(decided.events).toEqual([{ type: 'TicketResumed', at: at(5), ticketId: 'k1' }]);
   });
 
   it('保留と準備OKを往復しても順番（priorityAt）が変わらない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const original = ticketOf(state, 'k1').priorityAt;
     const paused = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(5))).state;
     const resumed = expectOk(apply(paused, { type: 'READY', ticketId: 'k1' }, at(20))).state;
@@ -561,7 +657,7 @@ describe('保留と準備OK（7.7 の 5〜7）', () => {
   });
 
   it('何度往復しても順番が変わらない', () => {
-    let state = join(venue(), 'k1', 2);
+    let state = join(waiting(), 'k1', 2);
     const original = ticketOf(state, 'k1').priorityAt;
     for (const round of [0, 1, 2]) {
       state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(round * 10 + 1))).state;
@@ -571,7 +667,7 @@ describe('保留と準備OK（7.7 の 5〜7）', () => {
   });
 
   it('準備OKで保留していた時間が合計に足され、起点が消える', () => {
-    const paused = expectOk(apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
+    const paused = expectOk(apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
     const resumed = expectOk(apply(paused, { type: 'READY', ticketId: 'k1' }, at(8))).state;
     const ticket = ticketOf(resumed, 'k1');
     expect(ticket.pausedTotal).toBe(minutes(7));
@@ -580,7 +676,7 @@ describe('保留と準備OK（7.7 の 5〜7）', () => {
   });
 
   it('保留の時間は往復のたびに積み上がる', () => {
-    let state = join(venue(), 'k1', 2);
+    let state = join(waiting(), 'k1', 2);
     state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(0))).state;
     state = expectOk(apply(state, { type: 'READY', ticketId: 'k1' }, at(4))).state;
     state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(10))).state;
@@ -589,17 +685,17 @@ describe('保留と準備OK（7.7 の 5〜7）', () => {
   });
 
   it('WAITING でない人は準備OKにできない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expectRejected(apply(state, { type: 'READY', ticketId: 'k1' }, at(1)), 'NOT_ALLOWED_IN_STATE');
   });
 
   it('PAUSED の人をもう一度保留にはできない', () => {
-    const paused = expectOk(apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
+    const paused = expectOk(apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
     expectRejected(apply(paused, { type: 'PAUSE', ticketId: 'k1' }, at(2)), 'NOT_ALLOWED_IN_STATE');
   });
 
   it('表に無い遷移として、終端の DONE から保留にはできない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const done: VenueState = {
       ...state,
       tickets: state.tickets.map((item) => ({
@@ -617,13 +713,13 @@ describe('保留の合計上限（7.16 の pause_max_total_min）', () => {
   const policy: Policy = { ...DEFAULT_POLICY, pauseStepMin: 10, pauseMaxTotalMin: 45 };
 
   it('残りが十分あれば 1 回分（10 分）だけ延びる', () => {
-    const state = join(venue({}, policy), 'k1', 2);
+    const state = join(waiting({}, policy), 'k1', 2);
     const paused = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(0))).state;
     expect(ticketOf(paused, 'k1').pauseDeadline).toBe(at(10));
   });
 
   it('残りが 1 回分に満たなければ、残りのぶんだけ延びる', () => {
-    let state = join(venue({}, policy), 'k1', 2);
+    let state = join(waiting({}, policy), 'k1', 2);
     state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(0))).state;
     state = expectOk(apply(state, { type: 'READY', ticketId: 'k1' }, at(40))).state;
     const paused = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(50))).state;
@@ -632,7 +728,7 @@ describe('保留の合計上限（7.16 の pause_max_total_min）', () => {
   });
 
   it('使い切っていれば期限が現在時刻になる（次の tick で期限切れ）', () => {
-    let state = join(venue({}, policy), 'k1', 2);
+    let state = join(waiting({}, policy), 'k1', 2);
     state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(0))).state;
     state = expectOk(apply(state, { type: 'READY', ticketId: 'k1' }, at(45))).state;
     const paused = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(60))).state;
@@ -645,7 +741,7 @@ describe('保留の合計上限（7.16 の pause_max_total_min）', () => {
    * 実運用の `tick` は 10 秒ごとなので、超過はその範囲に収まる。
    */
   it('持ち時間を使い切ったあとも、期限切れになるまでは合計が上限を少し超えうる', () => {
-    let state = join(venue({}, policy), 'k1', 2);
+    let state = join(waiting({}, policy), 'k1', 2);
     state = expectOk(apply(state, { type: 'PAUSE', ticketId: 'k1' }, at(0))).state;
     state = expectOk(apply(state, { type: 'READY', ticketId: 'k1' }, at(45))).state;
     // ここで持ち時間は尽きている。期限は即時になるが、tick が無ければ止まらない。
@@ -678,7 +774,7 @@ describe('保留の合計上限（7.16 の pause_max_total_min）', () => {
 
 describe('人数の変更（7.6 のエッジケース）', () => {
   it('減らすときは順番を保つ', () => {
-    const state = join(venue(), 'k1', 4);
+    const state = join(waiting(), 'k1', 4);
     const original = ticketOf(state, 'k1').priorityAt;
     const next = expectOk(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 2 }, at(10)),
@@ -689,7 +785,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('増やすときは順番を現在時刻にやり直す（1 名で登録して 4 名に変える抜け道を防ぐ）', () => {
-    const state = join(venue(), 'k1', 1);
+    const state = join(waiting(), 'k1', 1);
     const next = expectOk(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 4 }, at(30)),
     ).state;
@@ -699,7 +795,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('受付時刻（createdAt）は動かさない。絶対上限の起点は変わらない', () => {
-    const state = join(venue(), 'k1', 1);
+    const state = join(waiting(), 'k1', 1);
     const next = expectOk(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 4 }, at(30)),
     ).state;
@@ -707,7 +803,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('変更のイベントは前後の人数と、やり直した順番を伝える', () => {
-    const state = join(venue(), 'k1', 1);
+    const state = join(waiting(), 'k1', 1);
     const decided = expectOk(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 3 }, at(30)),
     );
@@ -717,7 +813,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('同じ人数への変更は何も起こさない（イベントも出ない）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const decided = expectOk(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 2 }, at(10)),
     );
@@ -726,7 +822,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('保留中でも変えられる（まだ待っている人なので）', () => {
-    const paused = expectOk(apply(join(venue(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
+    const paused = expectOk(apply(join(waiting(), 'k1', 2), { type: 'PAUSE', ticketId: 'k1' }, at(1))).state;
     const next = expectOk(
       apply(paused, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 1 }, at(2)),
     ).state;
@@ -734,7 +830,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('席が確保されている人は変えられない（定員を超えうるため）', () => {
-    const held = called(join(venue(), 'k1', 2), 'k1', 'tb-2', at(1));
+    const held = called(join(waiting(), 'k1', 2), 'k1', 'tb-2', at(1));
     expectRejected(
       apply(held, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 1 }, at(2)),
       'NOT_ALLOWED_IN_STATE',
@@ -742,7 +838,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('上限を超える人数には変えられない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expectRejected(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 9 }, at(1)),
       'PARTY_TOO_LARGE',
@@ -750,7 +846,7 @@ describe('人数の変更（7.6 のエッジケース）', () => {
   });
 
   it('0 名には変えられない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expectRejected(
       apply(state, { type: 'CHANGE_PARTY_SIZE', ticketId: 'k1', partySize: 0 }, at(1)),
       'PARTY_TOO_SMALL',
@@ -762,24 +858,24 @@ describe('人数の変更（7.6 のエッジケース）', () => {
 
 describe('心拍（7.9 の「暗黙のキャンセル」）', () => {
   it('最後に見た時刻を更新する', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const next = expectOk(apply(state, { type: 'HEARTBEAT', ticketId: 'k1' }, at(4))).state;
     expect(ticketOf(next, 'k1').lastSeenAt).toBe(at(4));
   });
 
   it('イベントを出さない（数秒ごとに届くため記録しない）', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     expect(expectOk(apply(state, { type: 'HEARTBEAT', ticketId: 'k1' }, at(4))).events).toEqual([]);
   });
 
   it('状態は変わらない', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const next = expectOk(apply(state, { type: 'HEARTBEAT', ticketId: 'k1' }, at(4))).state;
     expect(ticketOf(next, 'k1').state).toBe('WAITING');
   });
 
   it.each(['WAITING', 'PAUSED', 'CALLED', 'SEATED'] as const)('生きている %s では受け付ける', (live) => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const moved: VenueState = {
       ...state,
       tickets: state.tickets.map((item) => ({ ...item, state: live })),
@@ -790,7 +886,7 @@ describe('心拍（7.9 の「暗黙のキャンセル」）', () => {
   });
 
   it('終わったチケットの心拍は拒否される', () => {
-    const state = join(venue(), 'k1', 2);
+    const state = join(waiting(), 'k1', 2);
     const done = expectOk(
       apply(state, { type: 'CANCEL', ticketId: 'k1', by: 'user', reason: null }, at(1)),
     ).state;
@@ -827,7 +923,7 @@ describe('表示コードの枯渇', () => {
   });
 
   it('使用中のコードがあっても、空いているコードがあれば受け付ける', () => {
-    const base = join(venue(), 'k1', 2);
+    const base = join(waiting(), 'k1', 2);
     // カウンタを 0 に戻す。次の候補 A-01 は k1 が使っているので A-02 になる。
     const rewound: VenueState = { ...base, nextCodeSeq: 0 };
     const next = join(rewound, 'k2', 2, at(1));
@@ -878,7 +974,7 @@ describe('状態の一覧との対応', () => {
    * `NOT_ALLOWED_IN_STATE` かどうかだけで行う。
    */
   function acceptsFrom(from: TicketState, command: Command): boolean {
-    const base = join(venue(), 'k1', 2);
+    const base = join(waiting(), 'k1', 2);
     const moved: VenueState = {
       ...base,
       tickets: base.tickets.map((item) => ({ ...item, state: from })),

@@ -8,12 +8,13 @@
  * 2. 遷移表を引く。表に無ければ拒否する
  * 3. ガードを評価する。満たさなければ拒否する
  * 4. 新しい状態を組み立てる（元の状態は変えない）
- * 5. **不変条件を検査する。破れていたら変更を破棄して拒否する**
- * 6. 起きたことをイベントとして返す
+ * 5. **割当を実行する。** 空席と待ちが噛み合っていれば呼び出す（`allocate.ts`）
+ * 6. **不変条件を検査する。破れていたら変更を破棄して拒否する**
+ * 7. 起きたことをイベントとして返す
  *
- * **手順 5 を飛ばせないようにしてある。** 各コマンドの処理は module 内に閉じて
- * いて外から呼べず、`apply` だけが export されている。どの処理がどう状態を
- * 組み立てても、出口の検査を通らずに `VenueState` が外へ出ることはない
+ * **手順 5 と 6 を飛ばせないようにしてある。** 各コマンドの処理は module 内に
+ * 閉じていて外から呼べず、`apply` だけが export されている。どの処理がどう状態を
+ * 組み立てても、割当と出口の検査を通らずに `VenueState` が外へ出ることはない
  * （CLAUDE.md 3 章の判定基準）。
  *
  * 手順 2 を飛ばしていないことは、性質テストが押さえる。ランダムなコマンド列を
@@ -28,130 +29,44 @@
 import {
   allocateTicketCode,
   effectiveMaxPartySize,
+  findTable,
   findTicket,
   queuedTickets,
-  withTable,
   withTicket,
   type VenueState,
 } from '../domain/state.js';
 import { createTicket, type EndReason, type Ticket, type TicketState } from '../domain/ticket.js';
-import type { Policy } from '../domain/policy.js';
-import type { Table, TableStatus } from '../domain/table.js';
+import type { Table } from '../domain/table.js';
 import type { TicketCode, TicketId } from '../domain/ids.js';
 import { checkInvariants, formatViolations } from '../invariant.js';
 import { err, ok, type Result } from '../result.js';
-import { minutes, type DurationMs, type Timestamp } from '../time.js';
+import type { Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
+import { runAllocation } from './allocate.js';
 import {
   CANCEL_END_REASONS,
   type CancelCommand,
   type ChangePartySizeCommand,
   type Command,
+  type ExtendCommand,
   type HeartbeatCommand,
   type JoinCommand,
+  type PassCommand,
   type PauseCommand,
   type ReadyCommand,
 } from './command.js';
-import type { DomainEvent } from './events.js';
-import {
-  evaluateTableGuard,
-  evaluateTicketGuard,
-  tableGuardIsImplemented,
-  ticketGuardIsImplemented,
-} from './guards.js';
-import { STATE_INVARIANTS } from './invariants.js';
+import { closedPause, extendedHoldDeadline, pauseDeadlineFor, startedPause } from './deadlines.js';
+import type { DomainEvent, PauseReason } from './events.js';
+import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
 import { rejection, type Rejection } from './rejection.js';
-import { TABLE_TRANSITIONS, type TableEvent } from './table-machine.js';
-import {
-  HEARTBEAT_APPLIES_TO,
-  PARTY_SIZE_CHANGE_APPLIES_TO,
-  TICKET_TRANSITIONS,
-  type TicketEvent,
-} from './ticket-machine.js';
-import { transit } from './transit.js';
+import { clearedHold, endedTicket, releaseHeldTable } from './release.js';
+import { HEARTBEAT_APPLIES_TO, PARTY_SIZE_CHANGE_APPLIES_TO } from './ticket-machine.js';
+import { ticketTransition } from './transition.js';
 
-/** 手順 4 までで組み立てた変更。まだ検査を通っていない。 */
-type Draft = Decision<VenueState, DomainEvent>;
+/** 手順 4 までで組み立てた変更。まだ割当も検査も通っていない。 */
+export type Draft = Decision<VenueState, DomainEvent>;
 
 type Outcome = Result<Draft, Rejection>;
-
-// ---- 手順 2・3: 遷移表とガード ----
-
-/**
- * チケットに事象を起こしたときの行き先を求める。**状態は作らない。**
- *
- * 返すのは次の状態の名前だけなので、この関数を経由しても不変条件の検査を
- * 迂回できない。PR 6 以降もこれを通して遷移させること。
- */
-export function ticketTransition(
-  state: VenueState,
-  ticket: Ticket,
-  event: TicketEvent,
-  now: Timestamp,
-): Result<TicketState, Rejection> {
-  const outcome = transit(TICKET_TRANSITIONS, ticket.state, event, (guard) =>
-    evaluateTicketGuard({ state, ticket, now }, guard),
-  );
-  if (outcome.kind === 'moved') return ok(outcome.to);
-  if (outcome.kind === 'undeclared') {
-    return err(rejection('NOT_ALLOWED_IN_STATE', `${ticket.state} のチケットに ${event} は起こせない`));
-  }
-  return err(blocked(outcome.tried, ticketGuardIsImplemented));
-}
-
-/** テーブルに事象を起こしたときの行き先を求める。 */
-export function tableTransition(
-  state: VenueState,
-  table: Table,
-  event: TableEvent,
-  now: Timestamp,
-): Result<TableStatus, Rejection> {
-  const outcome = transit(TABLE_TRANSITIONS, table.status, event, (guard) =>
-    evaluateTableGuard({ state, table, now }, guard),
-  );
-  if (outcome.kind === 'moved') return ok(outcome.to);
-  if (outcome.kind === 'undeclared') {
-    return err(rejection('NOT_ALLOWED_IN_STATE', `${table.status} の席に ${event} は起こせない`));
-  }
-  return err(blocked(outcome.tried, tableGuardIsImplemented));
-}
-
-/** 「条件を満たさなかった」と「判定がまだ書かれていない」を区別する。 */
-function blocked<Guard extends string>(
-  tried: readonly Guard[],
-  isImplemented: (guard: Guard) => boolean,
-): Rejection {
-  const missing: readonly Guard[] = tried.filter((guard) => !isImplemented(guard));
-  if (missing.length === tried.length) {
-    return rejection('GUARD_NOT_IMPLEMENTED', `${missing.join('、')} の判定がまだ書かれていない`);
-  }
-  return rejection('BLOCKED_BY_GUARD', `${tried.join('、')} のいずれも成立しない`);
-}
-
-// ---- 保留の期限（全体プラン 7.7 の 7） ----
-
-/** まだ保留していられる時間。`pauseMaxTotalMin` から使った分を引いたもの。 */
-export function remainingPauseBudget(ticket: Ticket, policy: Policy): DurationMs {
-  const cap: DurationMs = minutes(policy.pauseMaxTotalMin);
-  return cap > ticket.pausedTotal ? cap - ticket.pausedTotal : 0;
-}
-
-/**
- * これから入る保留の期限。
- *
- * 1 回に延びるのは `pauseStepMin` まで。ただし合計が `pauseMaxTotalMin` を
- * 超えないように切り詰める。**1 つの仕掛け（期限）で 2 つのパラメータを守る。**
- * 残りが尽きている人の期限は現在時刻になり、次の `tick` で期限切れになる。
- */
-export function pauseDeadlineFor(ticket: Ticket, policy: Policy, now: Timestamp): Timestamp {
-  return now + Math.min(minutes(policy.pauseStepMin), remainingPauseBudget(ticket, policy));
-}
-
-/** 保留を閉じるときに書き換える欄。使った時間を合計へ足し込む。 */
-function closedPause(ticket: Ticket, now: Timestamp): Pick<Ticket, 'pauseDeadline' | 'pausedSince' | 'pausedTotal'> {
-  const spent: DurationMs = ticket.pausedSince === null ? 0 : Math.max(0, now - ticket.pausedSince);
-  return { pauseDeadline: null, pausedSince: null, pausedTotal: ticket.pausedTotal + spent };
-}
 
 // ---- 手順 1: 共通の前提条件 ----
 
@@ -176,6 +91,11 @@ function checkAppliesTo(ticket: Ticket, states: readonly TicketState[], label: s
   return states.includes(ticket.state)
     ? null
     : rejection('NOT_ALLOWED_IN_STATE', `${ticket.state} のチケットに${label}は行えない`);
+}
+
+/** チケットが確保している席。持っていなければ null。 */
+function tableOf(state: VenueState, ticket: Ticket): Table | null {
+  return ticket.tableId === null ? null : (findTable(state, ticket.tableId) ?? null);
 }
 
 // ---- 受付（全体プラン 7.5） ----
@@ -231,13 +151,13 @@ function handleCancel(state: VenueState, command: CancelCommand, now: Timestamp)
   if (command.by === 'staff' && command.reason === null) {
     return err(rejection('REASON_REQUIRED', 'スタッフの取り消しには理由が要る（監査のため）'));
   }
-  const moved = ticketTransition(state, ticket, 'CANCEL', now);
+  const moved = ticketTransition({ state, ticket, now, table: tableOf(state, ticket) }, 'CANCEL');
   if (!moved.ok) return err(moved.error);
 
   const released = releaseHeldTable(state, ticket, now);
   if (!released.ok) return err(released.error);
 
-  const endReason = CANCEL_END_REASONS[command.by];
+  const endReason: EndReason = CANCEL_END_REASONS[command.by];
   return ok({
     state: withTicket(released.value.state, endedTicket(ticket, moved.value, endReason, now)),
     events: [cancelled(ticket, command, endReason, now), ...released.value.events],
@@ -251,74 +171,70 @@ function cancelled(
   now: Timestamp,
 ): DomainEvent {
   return {
-    type: 'TicketCancelled',
+    type: 'TicketEnded',
     at: now,
     ticketId: ticket.id,
+    endReason,
     by: command.by,
-    reason: command.reason,
-    endReason,
+    cancelReason: command.reason,
   };
 }
 
-/**
- * 終端へ落ちたチケットの欄を揃える。
- *
- * 席との結びつきとホールドの期限を必ず外す。残っていると、その席が誰にも
- * 割り当てられなくなり、`terminal_holds_no_table` が破れる。呼び出された時刻
- * （`calledAt`）は履歴として残す。
- */
-function endedTicket(ticket: Ticket, to: TicketState, endReason: EndReason, now: Timestamp): Ticket {
-  return {
-    ...ticket,
-    ...closedPause(ticket, now),
-    state: to,
-    endedAt: now,
-    endReason,
-    tableId: null,
-    holdDeadline: null,
-  };
-}
-
-/**
- * 確保していた席を空席に戻す（全体プラン 7.9「`CALLED` 中なら席は即 `FREE`」）。
- *
- * **次の人への割当はここでは行わない。** 割当の実行は PR 6 が 1 か所に集める。
- * `verifiedFreeAt` も更新しない。誰も座っていないので、この席が空いていることの
- * 確からしさは確保する前から変わっていない。
- *
- * 席が見つからない場合は、何もせずに取り消しを続ける。その状態はすでに
- * `assigned_has_table` が破れているので、取り消しはむしろ食い違いを解消する。
- */
-function releaseHeldTable(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
-  if (ticket.tableId === null) return ok({ state, events: [] });
-  const table: Table | undefined = state.tables.find((candidate) => candidate.id === ticket.tableId);
-  if (table === undefined) return ok({ state, events: [] });
-
-  const moved = tableTransition(state, table, 'RELEASE', now);
-  if (!moved.ok) return err(moved.error);
-  const freed: Table = { ...table, status: moved.value, statusSince: now, occupantTicketId: null };
-  return ok({
-    state: withTable(state, freed),
-    events: [{ type: 'TableFreed', at: now, tableId: freed.id, releasedTicketId: ticket.id }],
-  });
-}
-
-// ---- 保留と準備OK（全体プラン 7.7 の 5〜7） ----
+// ---- 保留・準備OK・パス（全体プラン 7.7 の 5〜7） ----
 
 function handlePause(state: VenueState, command: PauseCommand, now: Timestamp): Outcome {
   const found = requireTicket(state, command.ticketId);
   if (!found.ok) return err(found.error);
   const ticket: Ticket = found.value;
 
-  const moved = ticketTransition(state, ticket, 'PAUSE', now);
+  const moved = ticketTransition({ state, ticket, now, table: null }, 'PAUSE');
+  if (!moved.ok) return err(moved.error);
+  return ok(pausedDraft(state, ticket, moved.value, 'user_pause', now));
+}
+
+/**
+ * 保留に入れる。
+ *
+ * 自分から保留にした場合、呼び出しを譲った場合、ホールドの期限が切れた場合の
+ * 3 つで同じ形になる。違いは `reason` だけで、利用者への通知の文面と統計に使う。
+ * `tick`（ノーショー）からも呼ぶ。
+ */
+export function pausedDraft(
+  state: VenueState,
+  ticket: Ticket,
+  to: TicketState,
+  reason: PauseReason,
+  now: Timestamp,
+): Draft {
+  const started = startedPause(ticket, state.policy, now);
+  const paused: Ticket = { ...ticket, ...clearedHold(), ...started, state: to };
+  return {
+    state: withTicket(state, paused),
+    events: [
+      { type: 'TicketPaused', at: now, ticketId: ticket.id, until: started.pauseDeadline, reason },
+    ],
+  };
+}
+
+/**
+ * 呼び出しを次の人へ譲る（7.7 の 5）。
+ *
+ * 席は即座に空席へ戻る。**次の人への案内はここには書かない。** 手順 5 の割当が拾う。
+ */
+function handlePass(state: VenueState, command: PassCommand, now: Timestamp): Outcome {
+  const found = requireTicket(state, command.ticketId);
+  if (!found.ok) return err(found.error);
+  const ticket: Ticket = found.value;
+
+  const moved = ticketTransition({ state, ticket, now, table: tableOf(state, ticket) }, 'PASS');
   if (!moved.ok) return err(moved.error);
 
-  const until: Timestamp = pauseDeadlineFor(ticket, state.policy, now);
-  const paused: Ticket = { ...ticket, state: moved.value, pauseDeadline: until, pausedSince: now };
-  return ok({
-    state: withTicket(state, paused),
-    events: [{ type: 'TicketPaused', at: now, ticketId: ticket.id, until }],
-  });
+  const released = releaseHeldTable(state, ticket, now);
+  if (!released.ok) return err(released.error);
+
+  const passed: Ticket = { ...ticket, passes: ticket.passes + 1 };
+  const draft = pausedDraft(released.value.state, passed, moved.value, 'passed', now);
+  return ok({ state: draft.state, events: [...draft.events, ...released.value.events] });
 }
 
 function handleReady(state: VenueState, command: ReadyCommand, now: Timestamp): Outcome {
@@ -326,7 +242,7 @@ function handleReady(state: VenueState, command: ReadyCommand, now: Timestamp): 
   if (!found.ok) return err(found.error);
   const ticket: Ticket = found.value;
 
-  const moved = ticketTransition(state, ticket, 'READY', now);
+  const moved = ticketTransition({ state, ticket, now, table: null }, 'READY');
   if (!moved.ok) return err(moved.error);
 
   // priorityAt には触れない。保留を挟んでも順番が変わらないことが、譲る動機を守る。
@@ -334,6 +250,67 @@ function handleReady(state: VenueState, command: ReadyCommand, now: Timestamp): 
   return ok({
     state: withTicket(state, resumed),
     events: [{ type: 'TicketResumed', at: now, ticketId: ticket.id }],
+  });
+}
+
+// ---- 延長（全体プラン 7.7 の 4、7 の 7） ----
+
+/**
+ * 状態ごとの、延ばす期限。
+ *
+ * 遷移表には `CALLED → CALLED`（向かっています）と `PAUSED → PAUSED`
+ * （まだ待っています）の 2 本がある。遷移が通った時点で状態はこのどちらかなので、
+ * 分岐を書かずに対応表から引く。
+ */
+const EXTEND_BY_STATE: Partial<
+  Readonly<Record<TicketState, (state: VenueState, ticket: Ticket, now: Timestamp) => Outcome>>
+> = {
+  CALLED: extendHold,
+  PAUSED: extendPause,
+};
+
+function handleExtend(state: VenueState, command: ExtendCommand, now: Timestamp): Outcome {
+  const found = requireTicket(state, command.ticketId);
+  if (!found.ok) return err(found.error);
+  const ticket: Ticket = found.value;
+
+  const moved = ticketTransition({ state, ticket, now, table: tableOf(state, ticket) }, 'EXTEND');
+  if (!moved.ok) return err(moved.error);
+
+  const extend = EXTEND_BY_STATE[ticket.state];
+  if (extend === undefined) {
+    return err(rejection('NOT_ALLOWED_IN_STATE', `${ticket.state} には延ばせる期限が無い`));
+  }
+  return extend(state, ticket, now);
+}
+
+/** 「向かっています」。**期限から足す**（7.7 の図の「期限(7:00) ──[延長 +3]──> 期限(10:00)」）。 */
+function extendHold(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
+  const deadline: Timestamp | null = extendedHoldDeadline(ticket, state.policy);
+  if (deadline === null) return err(rejection('NOT_ALLOWED_IN_STATE', '延ばせるホールドの期限が無い'));
+
+  const extended: Ticket = {
+    ...ticket,
+    holdDeadline: deadline,
+    extensions: ticket.extensions + 1,
+    // 期限が **実際に動いたときだけ** 知らせの記録を消し、新しい期限について
+    // もう一度知らせる。`holdExtensionMin` が 0 の施設では期限が動かないので、
+    // 無条件に消すと同じ知らせを繰り返してしまう（1 つの期限につき 1 回）。
+    holdRemindedAt: deadline > (ticket.holdDeadline ?? deadline) ? null : ticket.holdRemindedAt,
+  };
+  return ok({
+    state: withTicket(state, extended),
+    events: [{ type: 'TicketExtended', at: now, ticketId: ticket.id, from: 'CALLED', deadline }],
+  });
+}
+
+/** 「まだ待っています」。**いまから数え直す。** 応答した時点が起点になる。 */
+function extendPause(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
+  const deadline: Timestamp = pauseDeadlineFor(ticket, state.policy, now);
+  const extended: Ticket = { ...ticket, pauseDeadline: deadline };
+  return ok({
+    state: withTicket(state, extended),
+    events: [{ type: 'TicketExtended', at: now, ticketId: ticket.id, from: 'PAUSED', deadline }],
   });
 }
 
@@ -398,11 +375,39 @@ function route(state: VenueState, command: Command, now: Timestamp): Outcome {
       return handlePause(state, command, now);
     case 'READY':
       return handleReady(state, command, now);
+    case 'EXTEND':
+      return handleExtend(state, command, now);
+    case 'PASS':
+      return handlePass(state, command, now);
     case 'CHANGE_PARTY_SIZE':
       return handleChangePartySize(state, command, now);
     case 'HEARTBEAT':
       return handleHeartbeat(state, command, now);
   }
+}
+
+/**
+ * 割当を実行し、不変条件を検査して締める（手順 5〜7）。
+ *
+ * **`apply` と `tick` が共有する出口である。** どちらもここを通らずに状態を返さない。
+ * `no_starvation`（収まる空席があるのに待ちが残らない）をここで検査できるのは、
+ * 直前に割当を実行しているからである（PR 3 で常時検査から外した条件が戻ってくる）。
+ */
+export function settle(drafted: Draft, now: Timestamp): Outcome {
+  const allocated = runAllocation(drafted.state, now);
+  if (!allocated.ok) return err(allocated.error);
+
+  const violations = checkInvariants(
+    [...STATE_INVARIANTS, ...POST_ALLOCATION_INVARIANTS],
+    allocated.value.state,
+  );
+  if (violations.length > 0) {
+    return err(rejection('INVARIANT_VIOLATED', formatViolations(violations)));
+  }
+  return ok({
+    state: allocated.value.state,
+    events: [...drafted.events, ...allocated.value.events],
+  });
 }
 
 /**
@@ -422,10 +427,5 @@ export function apply(
 ): Result<Decision<VenueState, DomainEvent>, Rejection> {
   const drafted: Outcome = route(state, command, now);
   if (!drafted.ok) return drafted;
-
-  const violations = checkInvariants(STATE_INVARIANTS, drafted.value.state);
-  if (violations.length > 0) {
-    return err(rejection('INVARIANT_VIOLATED', formatViolations(violations)));
-  }
-  return ok(drafted.value);
+  return settle(drafted.value, now);
 }

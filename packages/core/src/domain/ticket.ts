@@ -117,6 +117,15 @@ export interface Ticket {
   /** ホールドの期限。絶対時刻で持つ。経過時間の累積では判定しない（9.4）。 */
   readonly holdDeadline: Timestamp | null;
 
+  /**
+   * 「あと 2 分で呼び出しが無効になります」を出した時刻（全体プラン 7.7 の 3）。
+   *
+   * **期限ごとに 1 回だけ出すための記録である。** `tick` は数秒ごとに走るので、
+   * 印が無ければ同じ知らせを出し続けてしまう。延長で期限が動いたら消し、
+   * 新しい期限についてもう一度知らせる。
+   */
+  readonly holdRemindedAt: Timestamp | null;
+
   /** 「向かっています」を押して延長した回数。 */
   readonly extensions: number;
 
@@ -172,6 +181,7 @@ const UNCALLED_FIELDS = {
   tableId: null,
   calledAt: null,
   holdDeadline: null,
+  holdRemindedAt: null,
   extensions: 0,
   passes: 0,
   noShows: 0,

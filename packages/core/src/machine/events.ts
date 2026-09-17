@@ -11,10 +11,16 @@
  * いま実際に出しているイベントだけを置く。
  *
  * 名前は過去形にする。コマンド（命令形）と混ぜない。
+ *
+ * **チケットの終わりは `TicketEnded` 1 つにまとめてある。** 終わり方は 10 通り
+ * （`END_REASONS`）あるが、消費者が知りたいのは「終わった」ことと「なぜ」で、
+ * そこは `endReason` が語る。終わり方ごとにイベントを分けると、終わり方を足す
+ * たびに消費者側の分岐が増え、書き忘れが起きる。
  */
 
 import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import type { EndReason } from '../domain/ticket.js';
+import type { AssignmentReason } from '../allocation/choose.js';
 import type { Timestamp } from '../time.js';
 import type { Actor, CancelReason } from './command.js';
 
@@ -28,13 +34,66 @@ export interface TicketJoined {
   readonly partySize: number;
 }
 
-/** 呼び出しを保留にした（全体プラン 7.7 の 5）。 */
+/**
+ * 呼び出した（全体プラン 7.7 の 1）。
+ *
+ * このイベントが通知（画面・Web Push・LINE・入口ボード）の起点になる。
+ * `reason` は「なぜこの人が選ばれたか」で、利用者への説明に使う（7.6）。
+ */
+export interface TicketCalled {
+  readonly type: 'TicketCalled';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+  readonly holdDeadline: Timestamp;
+  readonly reason: AssignmentReason;
+}
+
+/** 席を確保した。 */
+export interface TableHeld {
+  readonly type: 'TableHeld';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
+  readonly heldForTicketId: TicketId;
+}
+
+/** 「あと 2 分で呼び出しが無効になります」を出す時刻になった（全体プラン 7.7 の 3）。 */
+export interface TicketReminded {
+  readonly type: 'TicketReminded';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+  readonly holdDeadline: Timestamp;
+}
+
+/**
+ * 期限を延ばした（全体プラン 7.7 の 4、7 の 7）。
+ *
+ * ホールドの延長（「向かっています」）と保留の延長（「まだ待っています」）の
+ * 両方で出る。`from` がどちらかを語る。
+ */
+export interface TicketExtended {
+  readonly type: 'TicketExtended';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  /** どちらの期限を延ばしたか。 */
+  readonly from: 'CALLED' | 'PAUSED';
+  readonly deadline: Timestamp;
+}
+
+/** なぜ保留になったか。利用者への通知の文面と、統計に使う。 */
+export const PAUSE_REASONS = ['user_pause', 'passed', 'no_show'] as const;
+
+export type PauseReason = (typeof PAUSE_REASONS)[number];
+
+/** 保留に入った（全体プラン 7.7 の 5〜7）。 */
 export interface TicketPaused {
   readonly type: 'TicketPaused';
   readonly at: Timestamp;
   readonly ticketId: TicketId;
   /** この時刻を過ぎて操作が無ければ期限切れになる。画面の残り時間の元になる。 */
   readonly until: Timestamp;
+  readonly reason: PauseReason;
 }
 
 /** 「準備OK」で待ちに戻った（全体プラン 7.7 の 6）。 */
@@ -44,14 +103,16 @@ export interface TicketResumed {
   readonly ticketId: TicketId;
 }
 
-/** 取り消された（全体プラン 7.9）。 */
-export interface TicketCancelled {
-  readonly type: 'TicketCancelled';
+/**
+ * 順番が末尾に戻った（全体プラン 7.7 の 6 の `requeue_back`）。
+ *
+ * 保留を挟まずに待ちへ戻る点が「準備OK」と違う。順番はやり直しになる。
+ */
+export interface TicketRequeued {
+  readonly type: 'TicketRequeued';
   readonly at: Timestamp;
   readonly ticketId: TicketId;
-  readonly by: Actor;
-  readonly reason: CancelReason | null;
-  readonly endReason: EndReason;
+  readonly priorityAt: Timestamp;
 }
 
 /** 人数が変わった（全体プラン 7.6 のエッジケース）。 */
@@ -66,11 +127,21 @@ export interface PartySizeChanged {
 }
 
 /**
- * 席が空いた。
+ * チケットが終わった。**終わり方によらず、このイベント 1 つで表す。**
  *
- * この版では、確保していた人が取り消したときにだけ出る。退席（PR 7）や
- * ノーショー（PR 6）でも出るようになる。
+ * `by` と `cancelReason` は、人の操作で終わったときだけ埋まる。時刻が来て
+ * 終わったもの（ノーショー・保留の期限切れ・絶対上限・放置）では `null`。
  */
+export interface TicketEnded {
+  readonly type: 'TicketEnded';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly endReason: EndReason;
+  readonly by: Actor | null;
+  readonly cancelReason: CancelReason | null;
+}
+
+/** 席が空いた。取り消し・パス・ノーショーで確保が解けたときに出る。 */
 export interface TableFreed {
   readonly type: 'TableFreed';
   readonly at: Timestamp;
@@ -81,10 +152,15 @@ export interface TableFreed {
 
 export type DomainEvent =
   | TicketJoined
+  | TicketCalled
+  | TableHeld
+  | TicketReminded
+  | TicketExtended
   | TicketPaused
   | TicketResumed
-  | TicketCancelled
+  | TicketRequeued
   | PartySizeChanged
+  | TicketEnded
   | TableFreed;
 
 export type DomainEventType = DomainEvent['type'];
@@ -96,9 +172,14 @@ export type DomainEventType = DomainEvent['type'];
  */
 export const DOMAIN_EVENT_TYPES = [
   'TicketJoined',
+  'TicketCalled',
+  'TableHeld',
+  'TicketReminded',
+  'TicketExtended',
   'TicketPaused',
   'TicketResumed',
-  'TicketCancelled',
+  'TicketRequeued',
   'PartySizeChanged',
+  'TicketEnded',
   'TableFreed',
 ] as const satisfies readonly DomainEventType[];

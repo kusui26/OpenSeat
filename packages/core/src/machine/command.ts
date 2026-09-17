@@ -8,9 +8,13 @@
  * `JOIN` は `ticketId` を含み、生成はシミュレータとサーバの責務になる。例外は
  * 表示コードで、状態から決定的に導けるため `core` が採番する。
  *
- * コマンドは PR ごとに増える。この版（PR 5）が扱うのは、受付・キャンセル・保留と、
- * 状態を変えない 2 つ（人数の変更、心拍）である。呼び出しとホールド（PR 6）、
- * 着席と退席（PR 7）、座席 QR の分岐（PR 9）は後続で足す。
+ * コマンドは PR ごとに増える。この版（PR 6）が扱うのは、受付・キャンセル・保留・
+ * 延長・パスと、状態を変えない 2 つ（人数の変更、心拍）である。着席と退席（PR 7）、
+ * 座席 QR の分岐（PR 9）は後続で足す。
+ *
+ * **呼び出し（`CALL`）はコマンドに無い。** 誰をいつ呼ぶかは施設が決めることでは
+ * なく、空席と待ちの状況から決まる。`apply` と `tick` が最後に必ず割当を実行する
+ * （`allocate.ts`）。
  */
 
 import type { Tag, TicketId } from '../domain/ids.js';
@@ -79,6 +83,30 @@ export interface ReadyCommand {
   readonly ticketId: TicketId;
 }
 
+/**
+ * 期限の延長（全体プラン 7.7 の 4、7 の 7）。
+ *
+ * 呼び出し中は「向かっています」、保留中は「まだ待っています」にあたる。
+ * **利用者から見れば同じ「延長」なので、1 つのコマンドにしてある。** どちらの
+ * 期限を延ばすかは、いまの状態が決める（遷移表に `CALLED → CALLED` と
+ * `PAUSED → PAUSED` の 2 本がある）。
+ */
+export interface ExtendCommand {
+  readonly type: 'EXTEND';
+  readonly ticketId: TicketId;
+}
+
+/**
+ * 呼び出しを次の人へ譲る（全体プラン 7.7 の 5）。
+ *
+ * まだ料理を待っているときに使う。席は即座に空席へ戻り、本人は順番を保ったまま
+ * 保留になる。「準備OK」で待ちに戻れる。
+ */
+export interface PassCommand {
+  readonly type: 'PASS';
+  readonly ticketId: TicketId;
+}
+
 /** 人数の変更（全体プラン 7.6 のエッジケース）。待っている間だけできる。 */
 export interface ChangePartySizeCommand {
   readonly type: 'CHANGE_PARTY_SIZE';
@@ -102,6 +130,8 @@ export type Command =
   | CancelCommand
   | PauseCommand
   | ReadyCommand
+  | ExtendCommand
+  | PassCommand
   | ChangePartySizeCommand
   | HeartbeatCommand;
 
@@ -118,6 +148,8 @@ export const COMMAND_TYPES = [
   'CANCEL',
   'PAUSE',
   'READY',
+  'EXTEND',
+  'PASS',
   'CHANGE_PARTY_SIZE',
   'HEARTBEAT',
 ] as const satisfies readonly CommandType[];

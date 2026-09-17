@@ -147,6 +147,12 @@ describe('createTicket', () => {
     expect(ticket.pausedTotal).toBe(0);
   });
 
+  it('呼び出しの欄は空から始まる（まだ呼ばれていない）', () => {
+    const ticket = createTicket({ id: 't1', code: 'A-01', partySize: 2, now: NOW });
+    expect(ticket.holdDeadline).toBeNull();
+    expect(ticket.holdRemindedAt).toBeNull();
+  });
+
   it('保留の欄は空から始まる（まだ一度も保留していない）', () => {
     const ticket = createTicket({ id: 't1', code: 'A-01', partySize: 2, now: NOW });
     expect(ticket.pauseDeadline).toBeNull();
