@@ -110,6 +110,12 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'PASS', ticketId })),
   fc
+    .record({ ticketId: ticketIdArb, tableId: fc.constantFrom('tb0', 'tb1', HELD_TABLE_ID, 'missing') })
+    .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
+  fc
     .record({ ticketId: ticketIdArb, partySize: fc.integer({ min: 0, max: 6 }) })
     .map((fields): Command => ({ type: 'CHANGE_PARTY_SIZE', ...fields })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),

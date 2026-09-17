@@ -48,13 +48,22 @@ type TicketGuardPredicate = (context: TicketGuardContext) => boolean;
 /**
  * 実装済みのチケットのガード。
  *
- * 残り 4 つ（`isAssignedTable`、`earlyCheckInAllowed`、`swapAllowed`、
- * `hardLimitMode`）は着席と座席 QR（PR 7・9）、着席時間の上限（PR 10）で埋める。
+ * 残り 3 つ（`earlyCheckInAllowed`、`swapAllowed`、`hardLimitMode`）は
+ * 座席 QR の分岐（PR 9）と着席時間の上限（PR 10）で埋める。
  */
 const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardPredicate>>> = {
   /** 案内しようとしている席に人数が収まり、希望タグを満たすか（7.6）。 */
   fitsCapacity: ({ ticket, table }) =>
     table !== null && fitsCapacity(table, ticket.partySize) && satisfiesTags(table, ticket.requiredTags),
+
+  /**
+   * 読み取った席が、自分に割り当てられた席か（7.8 の 1 行目）。
+   *
+   * 座席 QR のトークンから `TableId` への解決は境界側の責務で、`core` は
+   * 解決済みの ID だけを受け取る（`table.ts` の冒頭）。ここで見るのは
+   * 「その ID が自分の席か」だけである。
+   */
+  isAssignedTable: ({ ticket, table }) => table !== null && ticket.tableId === table.id,
 
   /** 「向かっています」をまだ押せるか（7.7 の 4）。 */
   underExtensionLimit: ({ ticket, state }) => canExtendHold(ticket, state.policy),
@@ -84,12 +93,17 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
 /**
  * 実装済みの席のガード。
  *
- * 3 つとも、片付けの猶予（PR 7）と整合性の回復（PR 10）で使う遷移のものなので、
- * それぞれの PR で埋める。
+ * 残る `autoFreeEnabled` は「確認要」の自動解放（PR 10）で使う。
  */
 const TABLE_GUARD_PREDICATES: Partial<
   Readonly<Record<TableGuard, (context: TableGuardContext) => boolean>>
-> = {};
+> = {
+  /** 対象外にする操作が保留されているか（7.6 のエッジケース）。 */
+  disableAfterCurrent: ({ table }) => table.disableAfterCurrent,
+
+  /** 対象外の予約が無く、引き続き管理対象か。`disableAfterCurrent` の裏返し。 */
+  stillManaged: ({ table }) => !table.disableAfterCurrent,
+};
 
 /** そのガードの判定が書かれているか。 */
 export function ticketGuardIsImplemented(guard: TicketGuard): boolean {

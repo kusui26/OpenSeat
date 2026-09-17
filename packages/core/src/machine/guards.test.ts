@@ -5,10 +5,12 @@ import { createTicket, type Ticket } from '../domain/ticket.js';
 import { createVenueState, type VenueState } from '../domain/state.js';
 import { minutes, type Timestamp } from '../time.js';
 import {
+  evaluateTableGuard,
   evaluateTicketGuard,
   ticketGuardIsImplemented,
   unimplementedTableGuards,
   unimplementedTicketGuards,
+  type TableGuardContext,
   type TicketGuardContext,
 } from './guards.js';
 import { TICKET_GUARDS, TICKET_TRANSITIONS, type TicketGuard } from './ticket-machine.js';
@@ -45,21 +47,16 @@ describe('実装の進み具合', () => {
    * 残っているガードの数を明示して、増えないようにする。
    * PR 12 でここが空になる（`ticket-machine.ts` の冒頭の約束）。
    */
-  it('チケットのガードは 10 個中 6 個が実装済み', () => {
+  it('チケットのガードは 10 個中 7 個が実装済み', () => {
     expect([...unimplementedTicketGuards()].sort()).toEqual([
       'earlyCheckInAllowed',
       'hardLimitMode',
-      'isAssignedTable',
       'swapAllowed',
     ]);
   });
 
-  it('席のガードはまだ 1 つも実装していない（使う遷移が PR 7・10 のもの）', () => {
-    expect([...unimplementedTableGuards()].sort()).toEqual([
-      'autoFreeEnabled',
-      'disableAfterCurrent',
-      'stillManaged',
-    ]);
+  it('席のガードは 3 個中 2 個が実装済み（残るのは確認要の自動解放）', () => {
+    expect([...unimplementedTableGuards()].sort()).toEqual(['autoFreeEnabled']);
   });
 
   it('実装済みかどうかの判定は、宣言されたすべてのガードについて答えられる', () => {
@@ -173,5 +170,52 @@ describe('noNotificationChannel（7.9）', () => {
     const fresh = ticket({ lastSeenAt: NOW, hasNotificationChannel: false });
     expect(holds('noNotificationChannel', { ticket: fresh, now: NOW })).toBe(true);
     expect(holds('noNotificationChannel', { ticket: fresh, now: NOW + minutes(120) })).toBe(true);
+  });
+});
+
+describe('isAssignedTable（7.8 の 1 行目）', () => {
+  it('自分に割り当てられた席なら成立する', () => {
+    const called = ticket({ state: 'CALLED', tableId: 'tb' });
+    expect(holds('isAssignedTable', { ticket: called, table: table(4) })).toBe(true);
+  });
+
+  it('別の席なら成立しない（案内は PR 9 の座席 QR の分岐）', () => {
+    const called = ticket({ state: 'CALLED', tableId: 'other' });
+    expect(holds('isAssignedTable', { ticket: called, table: table(4) })).toBe(false);
+  });
+
+  it('席を持たない人には成立しない', () => {
+    expect(holds('isAssignedTable', { table: table(4) })).toBe(false);
+  });
+
+  it('読み取った席が渡されていなければ成立しない', () => {
+    const called = ticket({ state: 'CALLED', tableId: 'tb' });
+    expect(holds('isAssignedTable', { ticket: called, table: null })).toBe(false);
+  });
+});
+
+describe('席のガード（7.6 のエッジケース）', () => {
+  function tableContext(disableAfterCurrent: boolean): TableGuardContext {
+    return { state: venue(), table: { ...table(4), disableAfterCurrent }, now: NOW };
+  }
+
+  it('対象外の予約があれば disableAfterCurrent が成立する', () => {
+    expect(evaluateTableGuard(tableContext(true), 'disableAfterCurrent')).toBe(true);
+    expect(evaluateTableGuard(tableContext(true), 'stillManaged')).toBe(false);
+  });
+
+  it('予約が無ければ stillManaged が成立する', () => {
+    expect(evaluateTableGuard(tableContext(false), 'stillManaged')).toBe(true);
+    expect(evaluateTableGuard(tableContext(false), 'disableAfterCurrent')).toBe(false);
+  });
+
+  it('2 つはつねに排他（片付けの猶予の行き先が 1 つに決まる）', () => {
+    for (const reserved of [true, false]) {
+      const context = tableContext(reserved);
+      const satisfied = (['stillManaged', 'disableAfterCurrent'] as const).filter((guard) =>
+        evaluateTableGuard(context, guard),
+      );
+      expect(satisfied).toHaveLength(1);
+    }
   });
 });

@@ -32,20 +32,25 @@ import {
   findTable,
   findTicket,
   queuedTickets,
+  withTable,
   withTicket,
   type VenueState,
 } from '../domain/state.js';
 import { createTicket, type EndReason, type Ticket, type TicketState } from '../domain/ticket.js';
 import type { Table } from '../domain/table.js';
 import type { TicketCode, TicketId } from '../domain/ids.js';
-import { checkInvariants, formatViolations } from '../invariant.js';
 import { err, ok, type Result } from '../result.js';
-import type { Timestamp } from '../time.js';
+import { minutes, type Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
-import { runAllocation } from './allocate.js';
+import { settle, type Draft, type Outcome } from './settle.js';
 import {
   CANCEL_END_REASONS,
+  CHECKOUT_END_REASONS,
+  type Actor,
   type CancelCommand,
+  type CancelReason,
+  type CheckInCommand,
+  type CheckOutCommand,
   type ChangePartySizeCommand,
   type Command,
   type ExtendCommand,
@@ -57,16 +62,10 @@ import {
 } from './command.js';
 import { closedPause, extendedHoldDeadline, pauseDeadlineFor, startedPause } from './deadlines.js';
 import type { DomainEvent, PauseReason } from './events.js';
-import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
 import { rejection, type Rejection } from './rejection.js';
-import { clearedHold, endedTicket, releaseHeldTable } from './release.js';
+import { clearedHold, clearedHoldDeadline, endedTicket, releaseHeldTable } from './release.js';
 import { HEARTBEAT_APPLIES_TO, PARTY_SIZE_CHANGE_APPLIES_TO } from './ticket-machine.js';
-import { ticketTransition } from './transition.js';
-
-/** 手順 4 までで組み立てた変更。まだ割当も検査も通っていない。 */
-export type Draft = Decision<VenueState, DomainEvent>;
-
-type Outcome = Result<Draft, Rejection>;
+import { tableTransition, ticketTransition } from './transition.js';
 
 // ---- 手順 1: 共通の前提条件 ----
 
@@ -160,24 +159,19 @@ function handleCancel(state: VenueState, command: CancelCommand, now: Timestamp)
   const endReason: EndReason = CANCEL_END_REASONS[command.by];
   return ok({
     state: withTicket(released.value.state, endedTicket(ticket, moved.value, endReason, now)),
-    events: [cancelled(ticket, command, endReason, now), ...released.value.events],
+    events: [ticketEnded(ticket.id, endReason, command.by, command.reason, now), ...released.value.events],
   });
 }
 
-function cancelled(
-  ticket: Ticket,
-  command: CancelCommand,
+/** チケットが終わったことを伝える。終わり方によらずこの 1 つで表す。 */
+function ticketEnded(
+  ticketId: TicketId,
   endReason: EndReason,
+  by: Actor,
+  cancelReason: CancelReason | null,
   now: Timestamp,
 ): DomainEvent {
-  return {
-    type: 'TicketEnded',
-    at: now,
-    ticketId: ticket.id,
-    endReason,
-    by: command.by,
-    cancelReason: command.reason,
-  };
+  return { type: 'TicketEnded', at: now, ticketId, endReason, by, cancelReason };
 }
 
 // ---- 保留・準備OK・パス（全体プラン 7.7 の 5〜7） ----
@@ -314,6 +308,91 @@ function extendPause(state: VenueState, ticket: Ticket, now: Timestamp): Outcome
   });
 }
 
+// ---- 着席と退席（全体プラン 7.8、7.11 の 1 層目） ----
+
+/**
+ * 着席の確認。
+ *
+ * 読み取った席が自分の席であることを `isAssignedTable` が見る。別の席を
+ * 読んだ場合はここでは拒否する。「あなたの席は T-08 です」「この席に変更
+ * しますか？」といった案内は座席 QR の分岐（PR 9）の責務である。
+ */
+function handleCheckIn(state: VenueState, command: CheckInCommand, now: Timestamp): Outcome {
+  const found = requireTicket(state, command.ticketId);
+  if (!found.ok) return err(found.error);
+  const ticket: Ticket = found.value;
+
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const movedTicket = ticketTransition({ state, ticket, now, table }, 'CHECK_IN');
+  if (!movedTicket.ok) return err(movedTicket.error);
+  const movedTable = tableTransition({ state, table, now }, 'CHECK_IN');
+  if (!movedTable.ok) return err(movedTable.error);
+
+  // 席との結びつきは残す。外すのはホールドの期限だけ。
+  const seated: Ticket = { ...ticket, ...clearedHoldDeadline(), state: movedTicket.value, seatedAt: now };
+  const occupied: Table = { ...table, status: movedTable.value, statusSince: now };
+  return ok({
+    state: withTicket(withTable(state, occupied), seated),
+    events: [
+      { type: 'TicketSeated', at: now, ticketId: ticket.id, tableId: table.id },
+      { type: 'TableOccupied', at: now, tableId: table.id, occupantTicketId: ticket.id },
+    ],
+  });
+}
+
+/**
+ * 退席の申告。
+ *
+ * 席は片付けの猶予（`TURNOVER`）に入る。**猶予が明けるのを待つのは `tick` の
+ * 責務**で、既定の 0 分なら同じ処理のうちに明ける。
+ *
+ * `verifiedFreeAt` をここで更新する。「席が空いている」ことの手がかりとして、
+ * 本人の申告がもっとも新しい証拠になる（7.6 の席の並び順）。
+ */
+function handleCheckOut(state: VenueState, command: CheckOutCommand, now: Timestamp): Outcome {
+  const found = requireTicket(state, command.ticketId);
+  if (!found.ok) return err(found.error);
+  const ticket: Ticket = found.value;
+
+  const movedTicket = ticketTransition({ state, ticket, now, table: null }, 'CHECK_OUT');
+  if (!movedTicket.ok) return err(movedTicket.error);
+
+  const vacated = vacateTable(state, ticket, now);
+  if (!vacated.ok) return err(vacated.error);
+
+  const endReason: EndReason = CHECKOUT_END_REASONS[command.by];
+  return ok({
+    state: withTicket(vacated.value.state, endedTicket(ticket, movedTicket.value, endReason, now)),
+    events: [ticketEnded(ticket.id, endReason, command.by, null, now), ...vacated.value.events],
+  });
+}
+
+/** 使い終わった席を片付けの猶予へ送る。 */
+function vacateTable(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
+  const table: Table | null = tableOf(state, ticket);
+  if (table === null) return err(rejection('TABLE_NOT_FOUND', '着席中のチケットに席が無い'));
+
+  const moved = tableTransition({ state, table, now }, 'CHECK_OUT');
+  if (!moved.ok) return err(moved.error);
+
+  const freeAt: Timestamp = now + minutes(state.policy.turnoverMin);
+  const cleaning: Table = {
+    ...table,
+    status: moved.value,
+    statusSince: now,
+    occupantTicketId: null,
+    verifiedFreeAt: now,
+  };
+  return ok({
+    state: withTable(state, cleaning),
+    events: [
+      { type: 'TableVacated', at: now, tableId: table.id, vacatedByTicketId: ticket.id, freeAt },
+    ],
+  });
+}
+
 // ---- 人数の変更（全体プラン 7.6 のエッジケース） ----
 
 function handleChangePartySize(state: VenueState, command: ChangePartySizeCommand, now: Timestamp): Outcome {
@@ -364,50 +443,27 @@ function handleHeartbeat(state: VenueState, command: HeartbeatCommand, now: Time
 
 // ---- 入口 ----
 
-/** コマンドを担当する処理へ振り分ける（手順 1〜4）。 */
+/**
+ * コマンドを担当する処理へ振り分ける（手順 1〜4）。
+ *
+ * 種別ごとに 1 行ずつ並べるだけの分岐で、絡んだ条件は無い。分岐の数がそのまま
+ * 複雑度として数えられるが、分けても読みやすくならないのでこの関数だけ外す。
+ * 書き忘れは `switch-exhaustiveness-check` が捕まえる（型で守られている）。
+ */
+// eslint-disable-next-line complexity
 function route(state: VenueState, command: Command, now: Timestamp): Outcome {
   switch (command.type) {
-    case 'JOIN':
-      return handleJoin(state, command, now);
-    case 'CANCEL':
-      return handleCancel(state, command, now);
-    case 'PAUSE':
-      return handlePause(state, command, now);
-    case 'READY':
-      return handleReady(state, command, now);
-    case 'EXTEND':
-      return handleExtend(state, command, now);
-    case 'PASS':
-      return handlePass(state, command, now);
-    case 'CHANGE_PARTY_SIZE':
-      return handleChangePartySize(state, command, now);
-    case 'HEARTBEAT':
-      return handleHeartbeat(state, command, now);
+    case 'JOIN': return handleJoin(state, command, now);
+    case 'CANCEL': return handleCancel(state, command, now);
+    case 'PAUSE': return handlePause(state, command, now);
+    case 'READY': return handleReady(state, command, now);
+    case 'EXTEND': return handleExtend(state, command, now);
+    case 'PASS': return handlePass(state, command, now);
+    case 'CHECK_IN': return handleCheckIn(state, command, now);
+    case 'CHECK_OUT': return handleCheckOut(state, command, now);
+    case 'CHANGE_PARTY_SIZE': return handleChangePartySize(state, command, now);
+    case 'HEARTBEAT': return handleHeartbeat(state, command, now);
   }
-}
-
-/**
- * 割当を実行し、不変条件を検査して締める（手順 5〜7）。
- *
- * **`apply` と `tick` が共有する出口である。** どちらもここを通らずに状態を返さない。
- * `no_starvation`（収まる空席があるのに待ちが残らない）をここで検査できるのは、
- * 直前に割当を実行しているからである（PR 3 で常時検査から外した条件が戻ってくる）。
- */
-export function settle(drafted: Draft, now: Timestamp): Outcome {
-  const allocated = runAllocation(drafted.state, now);
-  if (!allocated.ok) return err(allocated.error);
-
-  const violations = checkInvariants(
-    [...STATE_INVARIANTS, ...POST_ALLOCATION_INVARIANTS],
-    allocated.value.state,
-  );
-  if (violations.length > 0) {
-    return err(rejection('INVARIANT_VIOLATED', formatViolations(violations)));
-  }
-  return ok({
-    state: allocated.value.state,
-    events: [...drafted.events, ...allocated.value.events],
-  });
 }
 
 /**

@@ -25,12 +25,13 @@
  * この性質（時間の飛ばし方によらず同じ状態に落ち着く）は PR 12 で検証する。
  */
 
-import { findTicket, type VenueState } from '../domain/state.js';
+import { findTicket, withTicket, type VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
 import type { Decision } from '../decision.js';
 import { err, ok, type Result } from '../result.js';
 import { hasPassed, type Timestamp } from '../time.js';
-import { pausedDraft, settle, type Draft } from './apply.js';
+import { pausedDraft } from './apply.js';
+import { settle, type Draft, type Outcome } from './settle.js';
 import {
   abandonedAt,
   holdExpiresAt,
@@ -41,11 +42,8 @@ import {
 import type { DomainEvent } from './events.js';
 import { rejection, type Rejection } from './rejection.js';
 import { endedTicket, releaseHeldTable } from './release.js';
-import { withTicket } from '../domain/state.js';
 import type { TicketEvent } from './ticket-machine.js';
 import { ticketTransition } from './transition.js';
-
-type Outcome = Result<Draft, Rejection>;
 
 /**
  * 時刻が来て起きること。
@@ -281,5 +279,8 @@ export function tick(
     current = settled.value.state;
     events.push(...settled.value.events);
   }
+
+  // 席の期限（片付けの猶予）は出口の `settle` が見る。`apply` でも同じように
+  // 明かす必要があるため、`tick` だけの仕事にはしていない。
   return settle({ state: current, events }, now);
 }

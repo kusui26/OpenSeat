@@ -8,16 +8,15 @@
  * `JOIN` は `ticketId` を含み、生成はシミュレータとサーバの責務になる。例外は
  * 表示コードで、状態から決定的に導けるため `core` が採番する。
  *
- * コマンドは PR ごとに増える。この版（PR 6）が扱うのは、受付・キャンセル・保留・
- * 延長・パスと、状態を変えない 2 つ（人数の変更、心拍）である。着席と退席（PR 7）、
- * 座席 QR の分岐（PR 9）は後続で足す。
+ * コマンドは PR ごとに増える。この版（PR 7）で **受付から退席までの一周が閉じた**。
+ * 残るのは座席 QR の分岐（PR 9）、整合性の回復（PR 10）、運用時間帯（PR 11）。
  *
  * **呼び出し（`CALL`）はコマンドに無い。** 誰をいつ呼ぶかは施設が決めることでは
  * なく、空席と待ちの状況から決まる。`apply` と `tick` が最後に必ず割当を実行する
  * （`allocate.ts`）。
  */
 
-import type { Tag, TicketId } from '../domain/ids.js';
+import type { TableId, Tag, TicketId } from '../domain/ids.js';
 import type { EndReason } from '../domain/ticket.js';
 
 /**
@@ -49,6 +48,17 @@ export type CancelReason = (typeof CANCEL_REASONS)[number];
 export const CANCEL_END_REASONS = {
   user: 'user_cancel',
   staff: 'staff_cancel',
+} as const satisfies Record<Actor, EndReason>;
+
+/**
+ * 誰が退席を申告したかと、記録される終わり方の対応。
+ *
+ * スタッフの申告に理由は求めない。取り消し（7.9）と違い、席を空けることは
+ * 利用者の不利益にならず、監査で問われるのは「誰が」だけである。
+ */
+export const CHECKOUT_END_REASONS = {
+  user: 'checked_out',
+  staff: 'staff_checkout',
 } as const satisfies Record<Actor, EndReason>;
 
 /** 受付（全体プラン 7.5）。入口の受付 QR から人数を登録する。 */
@@ -107,6 +117,33 @@ export interface PassCommand {
   readonly ticketId: TicketId;
 }
 
+/**
+ * 着席の確認（全体プラン 7.8 の 1 行目）。
+ *
+ * 座席 QR を読むか、卓上の 4 桁コードを入力すると出る。**「その席にいる証拠」
+ * を求めるのは着席確認だけ**で、退席は画面のボタンだけで済ませる（7.8 の末尾）。
+ *
+ * `tableId` は読み取った席。トークンから ID への解決は境界側の責務で、
+ * `core` は解決済みの ID を受け取る。自分の席かどうかは `isAssignedTable` が見る。
+ */
+export interface CheckInCommand {
+  readonly type: 'CHECK_IN';
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/**
+ * 退席の申告（全体プラン 7.8、7.11 の 1 層目）。
+ *
+ * **席の読み取りを求めない。** 手間を減らすほど申告率が上がり、退席を偽る動機は
+ * 無いためである。スタッフが代わりに申告することもできる。
+ */
+export interface CheckOutCommand {
+  readonly type: 'CHECK_OUT';
+  readonly ticketId: TicketId;
+  readonly by: Actor;
+}
+
 /** 人数の変更（全体プラン 7.6 のエッジケース）。待っている間だけできる。 */
 export interface ChangePartySizeCommand {
   readonly type: 'CHANGE_PARTY_SIZE';
@@ -132,6 +169,8 @@ export type Command =
   | ReadyCommand
   | ExtendCommand
   | PassCommand
+  | CheckInCommand
+  | CheckOutCommand
   | ChangePartySizeCommand
   | HeartbeatCommand;
 
@@ -150,6 +189,8 @@ export const COMMAND_TYPES = [
   'READY',
   'EXTEND',
   'PASS',
+  'CHECK_IN',
+  'CHECK_OUT',
   'CHANGE_PARTY_SIZE',
   'HEARTBEAT',
 ] as const satisfies readonly CommandType[];
