@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type NoShowPolicy, type Policy } from '../domain/policy.js';
 import { createTable, type Table } from '../domain/table.js';
-import { isTerminal, type Ticket } from '../domain/ticket.js';
+import { END_REASONS, isTerminal, type EndReason, type Ticket } from '../domain/ticket.js';
 import { createVenueState, sameVenueState, type VenueState } from '../domain/state.js';
 import { checkInvariants } from '../invariant.js';
 import { isDefect } from './rejection.js';
@@ -45,6 +45,7 @@ const policyArb: fc.Arbitrary<Policy> = fc
     pauseMaxTotalMin: fc.integer({ min: 0, max: 40 }),
     ticketMaxAgeMin: fc.integer({ min: 5, max: 60 }),
     abandonTimeoutMin: fc.integer({ min: 1, max: 20 }),
+    turnoverMin: fc.integer({ min: 0, max: 3 }),
   })
   .map((chosen) => ({
     ...DEFAULT_POLICY,
@@ -87,6 +88,12 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'PASS', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: fc.constantFrom('tb0', 'tb1', 'tb2') })
+    .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
@@ -288,20 +295,40 @@ describe('時刻起因の遷移が守ること', () => {
     );
   });
 
-  it('終わり方は、時刻起因なら 4 つのいずれかになる', () => {
-    const byTime: readonly string[] = ['no_show', 'pause_expired', 'max_age', 'abandoned'];
-    const byPerson: readonly string[] = ['user_cancel', 'staff_cancel'];
+  /**
+   * この版が作りうる終わり方の一覧。PR ごとに増える。
+   *
+   * 宣言されている 10 通り（`END_REASONS`）のうち、まだ作れないのは
+   * `auto_release`（着席時間の上限・PR 10）と `venue_closed`（全席解放・PR 11）。
+   * 想定外の終わり方が混ざれば、ここで落ちる。
+   */
+  const REACHABLE_END_REASONS: readonly EndReason[] = [
+    // 時刻が来て終わったもの
+    'no_show',
+    'pause_expired',
+    'max_age',
+    'abandoned',
+    // 人の操作で終わったもの
+    'user_cancel',
+    'staff_cancel',
+    'checked_out',
+    'staff_checkout',
+  ];
+
+  it('終わり方は、この版が作れる 8 通りのいずれかになる', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, moves, stepMin }) =>
         play(state, moves, stepMin).state.tickets.every(
-          (ticket) =>
-            ticket.endReason === null ||
-            byTime.includes(ticket.endReason) ||
-            byPerson.includes(ticket.endReason),
+          (ticket) => ticket.endReason === null || REACHABLE_END_REASONS.includes(ticket.endReason),
         ),
       ),
       RUNS,
     );
+  });
+
+  it('宣言されている終わり方のうち、まだ作れないのは 2 つだけ', () => {
+    const missing = END_REASONS.filter((reason) => !REACHABLE_END_REASONS.includes(reason));
+    expect([...missing].sort()).toEqual(['auto_release', 'venue_closed']);
   });
 
   it('呼び出された人には必ず期限が付いている', () => {
@@ -324,6 +351,42 @@ describe('時刻起因の遷移が守ること', () => {
           event.type === 'TicketReminded' ? `${event.ticketId}@${event.holdDeadline}` : '',
         );
         return new Set(keys).size === keys.length;
+      }),
+      RUNS,
+    );
+  });
+
+  /**
+   * **片付け中の席が取り残されない。**
+   *
+   * 猶予が明けた席は、`settle` が必ず空席に戻す。取り残されると、その席は
+   * 誰にも割り当てられないまま残り、`no_starvation` でも捕まらない
+   * （あの条件は `FREE` の席しか見ない）。
+   */
+  it('猶予が明けた席が片付け中のまま残らない', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const settled = play(state, moves, stepMin).state;
+        const end: Timestamp = endOf(moves, stepMin);
+        return settled.tables.every(
+          (item) =>
+            item.status !== 'TURNOVER' || item.statusSince + minutes(settled.policy.turnoverMin) > end,
+        );
+      }),
+      RUNS,
+    );
+  });
+
+  it('着席している人は必ず席を持ち、その席も本人を指す', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const settled = play(state, moves, stepMin).state;
+        return settled.tickets
+          .filter((item) => item.state === 'SEATED')
+          .every((item) => {
+            const seat = settled.tables.find((candidate) => candidate.id === item.tableId);
+            return seat?.status === 'OCCUPIED' && seat.occupantTicketId === item.id;
+          });
       }),
       RUNS,
     );

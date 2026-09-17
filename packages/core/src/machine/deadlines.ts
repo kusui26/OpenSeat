@@ -15,6 +15,7 @@
  */
 
 import type { Policy } from '../domain/policy.js';
+import type { Table } from '../domain/table.js';
 import type { Ticket } from '../domain/ticket.js';
 import { minutes, type DurationMs, type Timestamp } from '../time.js';
 import { MAX_AGE_APPLIES_TO } from './ticket-machine.js';
@@ -120,6 +121,21 @@ export function closedPause(
 ): Pick<Ticket, 'pauseDeadline' | 'pausedSince' | 'pausedTotal'> {
   const spent: DurationMs = ticket.pausedSince === null ? 0 : Math.max(0, now - ticket.pausedSince);
   return { pauseDeadline: null, pausedSince: null, pausedTotal: ticket.pausedTotal + spent };
+}
+
+// ---- 席の期限（全体プラン 7.6） ----
+
+/**
+ * 片付けの猶予が明ける時刻。
+ *
+ * 退席の申告で `TURNOVER` に入った時刻から `turnoverMin` 先。`turnoverMin` が
+ * 既定の 0 なら、その瞬間に明ける（`reached()` で測るため。`time.ts` を参照）。
+ *
+ * **席の期限は `reached()` で測る。** チケットの期限（利用者に与える猶予）と
+ * 違い、席の待ちは設備の都合なので、ちょうどで終わらせる。
+ */
+export function turnoverEndsAt(table: Table, policy: Policy): Timestamp | null {
+  return table.status === 'TURNOVER' ? table.statusSince + minutes(policy.turnoverMin) : null;
 }
 
 // ---- 受付からの絶対上限（全体プラン 7.7 の 7） ----

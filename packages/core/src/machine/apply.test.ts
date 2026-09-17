@@ -234,11 +234,11 @@ describe('遷移の段（手順 2・3）', () => {
 
   it('判定がまだ書かれていないガードは、通らずに GUARD_NOT_IMPLEMENTED になる', () => {
     const held = ticketOf(called(state, 'k1', 'tb-2'), 'k1');
-    const moved = ticketTransition({ state, ticket: held, now: NOW, table: null }, 'CHECK_IN');
+    const moved = ticketTransition({ state, ticket: held, now: NOW, table: null }, 'SWAP_TABLE');
     expect(moved.ok).toBe(false);
     if (!moved.ok) {
       expect(moved.error.code).toBe('GUARD_NOT_IMPLEMENTED');
-      expect(moved.error.describe).toContain('isAssignedTable');
+      expect(moved.error.describe).toContain('swapAllowed');
     }
   });
 

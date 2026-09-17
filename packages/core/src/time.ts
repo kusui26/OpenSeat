@@ -30,9 +30,26 @@ export function after(at: Timestamp, elapsed: DurationMs): Timestamp {
   return at + elapsed;
 }
 
-/** 期限を過ぎているかを判定する。期限ちょうどは「過ぎていない」とする。 */
+/**
+ * 期限を過ぎているかを判定する。期限ちょうどは「過ぎていない」とする。
+ *
+ * **利用者に与える猶予はこちらで測る。** ホールドの 7 分、保留の 10 分、受付から
+ * の 90 分。7 分ちょうどに着いた人はまだ間に合っている、という扱いになる。
+ */
 export function hasPassed(deadline: Timestamp, now: Timestamp): boolean {
   return now > deadline;
+}
+
+/**
+ * 待ち時間に達したかを判定する。ちょうどで「達した」とする。
+ *
+ * **設備の都合で待つ時間はこちらで測る。** 片付けの猶予など。`hasPassed` と
+ * 分けてあるのは、猶予を 0 に設定したときに「待ち時間ゼロ」が本当にゼロに
+ * なるようにするためである。`hasPassed` で測ると、0 分の猶予でも次の `tick`
+ * まで席が空かない。誰の利益にもならない待ちを作らない。
+ */
+export function reached(deadline: Timestamp, now: Timestamp): boolean {
+  return now >= deadline;
 }
 
 /** 期限までの残り時間。過ぎている場合は 0 を返す（負の値を外に出さない）。 */

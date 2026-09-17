@@ -24,7 +24,18 @@ import { tableTransition } from './transition.js';
  * 消すのは「いま効いているもの」だけである。
  */
 export function clearedHold(): Pick<Ticket, 'tableId' | 'holdDeadline' | 'holdRemindedAt'> {
-  return { tableId: null, holdDeadline: null, holdRemindedAt: null };
+  return { tableId: null, ...clearedHoldDeadline() };
+}
+
+/**
+ * ホールドの期限だけを外す。**席との結びつきは残す。**
+ *
+ * 着席したときに使う。席はそのまま使い続けるが、「いつまでに来てください」の
+ * 期限はもう働かない。`holdRemindedAt` も消して、不変条件 10（`CALLED` の
+ * あいだだけ入っている）を保つ。
+ */
+export function clearedHoldDeadline(): Pick<Ticket, 'holdDeadline' | 'holdRemindedAt'> {
+  return { holdDeadline: null, holdRemindedAt: null };
 }
 
 /**

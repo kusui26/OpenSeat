@@ -17,6 +17,7 @@ export {
   seconds,
   after,
   hasPassed,
+  reached,
   remaining,
   elapsedSince,
 } from './time.js';
@@ -200,10 +201,18 @@ export type {
   ReadyCommand,
   ExtendCommand,
   PassCommand,
+  CheckInCommand,
+  CheckOutCommand,
   ChangePartySizeCommand,
   HeartbeatCommand,
 } from './machine/command.js';
-export { ACTORS, CANCEL_REASONS, CANCEL_END_REASONS, COMMAND_TYPES } from './machine/command.js';
+export {
+  ACTORS,
+  CANCEL_REASONS,
+  CANCEL_END_REASONS,
+  CHECKOUT_END_REASONS,
+  COMMAND_TYPES,
+} from './machine/command.js';
 
 export type { Rejection, RejectionCode } from './machine/rejection.js';
 export { REJECTION_CODES, rejection, isDefect } from './machine/rejection.js';
@@ -220,9 +229,13 @@ export type {
   TicketPaused,
   TicketResumed,
   TicketRequeued,
+  TicketSeated,
+  TableOccupied,
+  TableVacated,
   PartySizeChanged,
   TicketEnded,
   TableFreed,
+  TableDisabled,
 } from './machine/events.js';
 export { DOMAIN_EVENT_TYPES, PAUSE_REASONS } from './machine/events.js';
 
@@ -257,10 +270,11 @@ export {
   closedPause,
   maxAgeAt,
   abandonedAt,
+  turnoverEndsAt,
 } from './machine/deadlines.js';
 
 // ---- 呼び出し・ホールド・ノーショー（Phase 1 PR 6）----
 
 export { runAllocation } from './machine/allocate.js';
-export { clearedHold, endedTicket, releaseHeldTable } from './machine/release.js';
+export { clearedHold, clearedHoldDeadline, endedTicket, releaseHeldTable } from './machine/release.js';
 export { tick } from './machine/tick.js';

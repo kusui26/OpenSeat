@@ -15,6 +15,7 @@
  * | コード | いつ返るか |
  * |---|---|
  * | `TICKET_NOT_FOUND` | 指定されたチケットが存在しない |
+ * | `TABLE_NOT_FOUND` | 指定された席が存在しない |
  * | `TICKET_ALREADY_EXISTS` | 同じ ID のチケットがすでにある（受付の再送） |
  * | `PARTY_SIZE_INVALID` | 人数が整数でない |
  * | `PARTY_TOO_SMALL` | 人数が 1 未満 |
@@ -30,6 +31,7 @@
  */
 export const REJECTION_CODES = [
   'TICKET_NOT_FOUND',
+  'TABLE_NOT_FOUND',
   'TICKET_ALREADY_EXISTS',
   'PARTY_SIZE_INVALID',
   'PARTY_TOO_SMALL',

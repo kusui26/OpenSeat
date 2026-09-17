@@ -6,6 +6,7 @@ import {
   elapsedSince,
   hasPassed,
   minutes,
+  reached,
   remaining,
   seconds,
   type Timestamp,
@@ -60,5 +61,30 @@ describe('elapsedSince', () => {
 
   it('未来の時刻を渡されたら 0 を返す', () => {
     expect(elapsedSince(after(BASE, minutes(1)), BASE)).toBe(0);
+  });
+});
+
+describe('reached（設備の都合の待ち）', () => {
+  it('ちょうどで「達した」とする', () => {
+    expect(reached(BASE, BASE)).toBe(true);
+  });
+
+  it('まだ来ていなければ達していない', () => {
+    expect(reached(BASE + 1, BASE)).toBe(false);
+  });
+
+  it('過ぎていれば達している', () => {
+    expect(reached(BASE, BASE + 1)).toBe(true);
+  });
+
+  /**
+   * `hasPassed` との違いは境界の 1 点だけ。**待ち時間を 0 に設定したときに、
+   * 本当に待ち時間ゼロになる**ようにするためにある（片付けの猶予など）。
+   */
+  it('hasPassed と違うのは、期限ちょうどの 1 点だけ', () => {
+    for (const offset of [-2, -1, 1, 2]) {
+      expect(reached(BASE, BASE + offset)).toBe(hasPassed(BASE, BASE + offset));
+    }
+    expect(reached(BASE, BASE)).not.toBe(hasPassed(BASE, BASE));
   });
 });

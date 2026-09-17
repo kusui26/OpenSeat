@@ -115,6 +115,36 @@ export interface TicketRequeued {
   readonly priorityAt: Timestamp;
 }
 
+/** 着席した（全体プラン 7.8 の 1 行目）。 */
+export interface TicketSeated {
+  readonly type: 'TicketSeated';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/** 席に人が着いた。 */
+export interface TableOccupied {
+  readonly type: 'TableOccupied';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
+  readonly occupantTicketId: TicketId;
+}
+
+/**
+ * 席が使い終わった（全体プラン 7.6 の片付けの猶予）。
+ *
+ * まだ空席ではない。`freeAt` を過ぎると `TableFreed` が出て次の人に渡る。
+ * 猶予が 0 分の施設では、同じ処理のうちに両方が出る。
+ */
+export interface TableVacated {
+  readonly type: 'TableVacated';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
+  readonly vacatedByTicketId: TicketId;
+  readonly freeAt: Timestamp;
+}
+
 /** 人数が変わった（全体プラン 7.6 のエッジケース）。 */
 export interface PartySizeChanged {
   readonly type: 'PartySizeChanged';
@@ -141,13 +171,30 @@ export interface TicketEnded {
   readonly cancelReason: CancelReason | null;
 }
 
-/** 席が空いた。取り消し・パス・ノーショーで確保が解けたときに出る。 */
+/**
+ * 席が空いた。**次の人に案内できる状態になったことを表す。**
+ *
+ * 取り消し・パス・ノーショーで確保が解けたときと、片付けの猶予が明けたときに出る。
+ * 後者では解ける確保が無いので `releasedTicketId` は `null` になる。
+ */
 export interface TableFreed {
   readonly type: 'TableFreed';
   readonly at: Timestamp;
   readonly tableId: TableId;
-  /** 誰の確保が解けたか。空席になった理由の説明に使う。 */
-  readonly releasedTicketId: TicketId;
+  /** 誰の確保が解けたか。片付けの猶予が明けた場合は `null`。 */
+  readonly releasedTicketId: TicketId | null;
+}
+
+/**
+ * 席が管理対象から外れた。
+ *
+ * 対象外にする操作が保留されていた席が、利用の終了とともに外れたときに出る
+ * （7.6 のエッジケース）。運用時間帯による切り替えは PR 11 で扱う。
+ */
+export interface TableDisabled {
+  readonly type: 'TableDisabled';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
 }
 
 export type DomainEvent =
@@ -159,9 +206,13 @@ export type DomainEvent =
   | TicketPaused
   | TicketResumed
   | TicketRequeued
+  | TicketSeated
+  | TableOccupied
+  | TableVacated
   | PartySizeChanged
   | TicketEnded
-  | TableFreed;
+  | TableFreed
+  | TableDisabled;
 
 export type DomainEventType = DomainEvent['type'];
 
@@ -179,7 +230,11 @@ export const DOMAIN_EVENT_TYPES = [
   'TicketPaused',
   'TicketResumed',
   'TicketRequeued',
+  'TicketSeated',
+  'TableOccupied',
+  'TableVacated',
   'PartySizeChanged',
   'TicketEnded',
   'TableFreed',
+  'TableDisabled',
 ] as const satisfies readonly DomainEventType[];
