@@ -166,3 +166,16 @@ export {
   priorityPreservedAcrossPause,
   tickIdempotent,
 } from './machine/invariants.js';
+
+// ---- 割当の選択（Phase 1 PR 4）----
+
+export type { Assignment, AssignmentReason, Pick } from './allocation/choose.js';
+export {
+  ASSIGNMENT_REASONS,
+  orderTables,
+  assignableTables,
+  candidatesFor,
+  waste,
+  pickCandidate,
+  chooseAssignments,
+} from './allocation/choose.js';
