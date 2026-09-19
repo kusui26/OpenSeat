@@ -8,8 +8,11 @@
  * `JOIN` は `ticketId` を含み、生成はシミュレータとサーバの責務になる。例外は
  * 表示コードで、状態から決定的に導けるため `core` が採番する。
  *
- * コマンドは PR ごとに増える。この版（PR 7）で **受付から退席までの一周が閉じた**。
- * 残るのは座席 QR の分岐（PR 9）、整合性の回復（PR 10）、運用時間帯（PR 11）。
+ * コマンドは PR ごとに増える。この版（PR 9）で **座席 QR が出せる操作がそろった**。
+ * 残るのは整合性の回復（PR 10）と運用時間帯（PR 11）。
+ *
+ * 座席 QR を読んだ人に何を見せ、どの操作を出すかは `scan/resolve.ts` が決める
+ * （全体プラン 7.8 の分岐表）。
  *
  * **呼び出し（`CALL`）はコマンドに無い。** 誰をいつ呼ぶかは施設が決めることでは
  * なく、空席と待ちの状況から決まる。`apply` と `tick` が最後に必ず割当を実行する
@@ -144,6 +147,87 @@ export interface CheckOutCommand {
   readonly by: Actor;
 }
 
+/**
+ * 席の変更（全体プラン 7.8 の 2 行目）。
+ *
+ * 呼び出された人が、案内された席とは別の空席の QR を読んだとき。
+ * `allowTableSwap`（既定 ON）が立っていて、その席に人数が収まるなら移れる。
+ * 元の席は空席に戻り、次の人へ渡る。
+ */
+export interface SwapTableCommand {
+  readonly type: 'SWAP_TABLE';
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/**
+ * 前倒しの着席（全体プラン 7.8 の 4 行目）。
+ *
+ * 待っている人が空席の QR を読んだとき。**待ち順序を崩さない条件つき**で、
+ * 呼び出しを待たずに座れる。条件は `earlyCheckInAllowed` が見る。
+ */
+export interface CheckInEarlyCommand {
+  readonly type: 'CHECK_IN_EARLY';
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/**
+ * 飛び込み着席（全体プラン 7.12、7.8 の 6 行目）。
+ *
+ * チケットを持たない人が、待ちのいない空席の QR を読んで人数を入れたとき。
+ * **登録を経ずにチケットが作られ、いきなり `SEATED` から始まる。**
+ * これで (a) 待ちがない時間帯でも占有状況が正確になり、(b) 登録した人が
+ * 守られ、(c)「待ちがいるのに席が空いている」矛盾がなくなる（7.12）。
+ */
+export interface WalkInCommand {
+  readonly type: 'WALK_IN';
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+  readonly partySize: number;
+}
+
+/**
+ * 案内された席に誰かが座っていた（全体プラン 7.8 の 10 行目）。
+ *
+ * 席は「誰かが使っているが誰かは分からない」状態になり、本人は待ちに戻る。
+ * **受付時刻はそのまま**で、さらに同時刻の他者より前に出る（`conflictPriority`）。
+ * 案内した側の落ち度なので、順番で埋め合わせる。
+ */
+export interface ReportTakenCommand {
+  readonly type: 'REPORT_TAKEN';
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/**
+ * この席は使用中だ、という報告（全体プラン 7.11 の 3 層目、7.4）。
+ *
+ * 「空いている可能性が高い席」（`NEEDS_CHECK`）に案内された人が押す
+ * 「使用中」がこれにあたる。第三者やスタッフからの報告でも使う。
+ *
+ * `ticketId` がある場合、その人は席が塞がっていた人として扱われ、
+ * 次の席へ最優先で案内される（`REPORT_TAKEN` と同じ埋め合わせ）。
+ */
+export interface ReportInUseCommand {
+  readonly type: 'REPORT_IN_USE';
+  readonly tableId: TableId;
+  readonly ticketId: TicketId | null;
+}
+
+/**
+ * この席は空いている、という報告（全体プラン 7.8 の 9 行目、7.11 の 3〜4 層目）。
+ *
+ * 「使用中」と記録されている席が実際には空だったときに押す。
+ * **誰が座っているか分かっている席（`OCCUPIED`）には使えない。** 遷移表に
+ * 宣言が無く、第三者が着席中の人を追い出せないようにしてある。
+ */
+export interface ConfirmFreeCommand {
+  readonly type: 'CONFIRM_FREE';
+  readonly tableId: TableId;
+  readonly by: Actor;
+}
+
 /** 人数の変更（全体プラン 7.6 のエッジケース）。待っている間だけできる。 */
 export interface ChangePartySizeCommand {
   readonly type: 'CHANGE_PARTY_SIZE';
@@ -171,6 +255,12 @@ export type Command =
   | PassCommand
   | CheckInCommand
   | CheckOutCommand
+  | SwapTableCommand
+  | CheckInEarlyCommand
+  | WalkInCommand
+  | ReportTakenCommand
+  | ReportInUseCommand
+  | ConfirmFreeCommand
   | ChangePartySizeCommand
   | HeartbeatCommand;
 
@@ -191,6 +281,12 @@ export const COMMAND_TYPES = [
   'PASS',
   'CHECK_IN',
   'CHECK_OUT',
+  'SWAP_TABLE',
+  'CHECK_IN_EARLY',
+  'WALK_IN',
+  'REPORT_TAKEN',
+  'REPORT_IN_USE',
+  'CONFIRM_FREE',
   'CHANGE_PARTY_SIZE',
   'HEARTBEAT',
 ] as const satisfies readonly CommandType[];

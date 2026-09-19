@@ -132,7 +132,12 @@ export {
   eventsUsedIn,
 } from './machine/graph.js';
 
-export type { TicketEvent, TicketGuard, TicketTransition } from './machine/ticket-machine.js';
+export type {
+  TicketEvent,
+  TicketGuard,
+  TicketTransition,
+  TicketOrigin,
+} from './machine/ticket-machine.js';
 export {
   TICKET_EVENTS,
   TICKET_GUARDS,
@@ -141,6 +146,7 @@ export {
   MAX_AGE_APPLIES_TO,
   HEARTBEAT_APPLIES_TO,
   PARTY_SIZE_CHANGE_APPLIES_TO,
+  CONFLICT_PRIORITY_APPLIES_TO,
 } from './machine/ticket-machine.js';
 
 export type { TableEvent, TableGuard, TableTransition } from './machine/table-machine.js';
@@ -203,6 +209,12 @@ export type {
   PassCommand,
   CheckInCommand,
   CheckOutCommand,
+  SwapTableCommand,
+  CheckInEarlyCommand,
+  WalkInCommand,
+  ReportTakenCommand,
+  ReportInUseCommand,
+  ConfirmFreeCommand,
   ChangePartySizeCommand,
   HeartbeatCommand,
 } from './machine/command.js';
@@ -221,6 +233,7 @@ export type {
   DomainEvent,
   DomainEventType,
   PauseReason,
+  RequeueReason,
   TicketJoined,
   TicketCalled,
   TableHeld,
@@ -229,6 +242,8 @@ export type {
   TicketPaused,
   TicketResumed,
   TicketRequeued,
+  TicketSwapped,
+  TableReportedInUse,
   TicketSeated,
   TableOccupied,
   TableVacated,
@@ -237,7 +252,7 @@ export type {
   TableFreed,
   TableDisabled,
 } from './machine/events.js';
-export { DOMAIN_EVENT_TYPES, PAUSE_REASONS } from './machine/events.js';
+export { DOMAIN_EVENT_TYPES, PAUSE_REASONS, REQUEUE_REASONS } from './machine/events.js';
 
 export type { TicketGuardContext, TableGuardContext } from './machine/guards.js';
 export {
@@ -278,3 +293,8 @@ export {
 export { runAllocation } from './machine/allocate.js';
 export { clearedHold, clearedHoldDeadline, endedTicket, releaseHeldTable } from './machine/release.js';
 export { tick } from './machine/tick.js';
+
+// ---- 座席 QR の分岐（Phase 1 PR 9）----
+
+export type { TableScanKind, TableScanOutcome } from './scan/resolve.js';
+export { TABLE_SCAN_KINDS, resolveTableScan } from './scan/resolve.js';

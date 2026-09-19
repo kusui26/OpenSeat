@@ -161,7 +161,9 @@ function requeuedDraft(state: VenueState, ticket: Ticket, now: Timestamp): Draft
   };
   return {
     state: withTicket(state, requeued),
-    events: [{ type: 'TicketRequeued', at: now, ticketId: ticket.id, priorityAt: now }],
+    events: [
+      { type: 'TicketRequeued', at: now, ticketId: ticket.id, priorityAt: now, reason: 'no_show' },
+    ],
   };
 }
 

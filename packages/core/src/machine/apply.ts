@@ -34,11 +34,12 @@ import {
   queuedTickets,
   withTable,
   withTicket,
+  type CodeAllocation,
   type VenueState,
 } from '../domain/state.js';
 import { createTicket, type EndReason, type Ticket, type TicketState } from '../domain/ticket.js';
-import type { Table } from '../domain/table.js';
-import type { TicketCode, TicketId } from '../domain/ids.js';
+import { fitsCapacity, type Table, type TableStatus } from '../domain/table.js';
+import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import { err, ok, type Result } from '../result.js';
 import { minutes, type Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
@@ -50,7 +51,13 @@ import {
   type CancelCommand,
   type CancelReason,
   type CheckInCommand,
+  type CheckInEarlyCommand,
   type CheckOutCommand,
+  type ConfirmFreeCommand,
+  type ReportInUseCommand,
+  type ReportTakenCommand,
+  type SwapTableCommand,
+  type WalkInCommand,
   type ChangePartySizeCommand,
   type Command,
   type ExtendCommand,
@@ -64,7 +71,13 @@ import { closedPause, extendedHoldDeadline, pauseDeadlineFor, startedPause } fro
 import type { DomainEvent, PauseReason } from './events.js';
 import { rejection, type Rejection } from './rejection.js';
 import { clearedHold, clearedHoldDeadline, endedTicket, releaseHeldTable } from './release.js';
-import { HEARTBEAT_APPLIES_TO, PARTY_SIZE_CHANGE_APPLIES_TO } from './ticket-machine.js';
+import {
+  CONFLICT_PRIORITY_APPLIES_TO,
+  HEARTBEAT_APPLIES_TO,
+  PARTY_SIZE_CHANGE_APPLIES_TO,
+  TICKET_INITIAL_STATES,
+  type TicketOrigin,
+} from './ticket-machine.js';
 import { tableTransition, ticketTransition } from './transition.js';
 
 // ---- 手順 1: 共通の前提条件 ----
@@ -123,9 +136,7 @@ function handleJoin(state: VenueState, command: JoinCommand, now: Timestamp): Ou
   const ticket: Ticket = newTicket(command, allocation.code, now);
   return ok({
     state: { ...state, tickets: [...state.tickets, ticket], nextCodeSeq: allocation.nextSeq },
-    events: [
-      { type: 'TicketJoined', at: now, ticketId: ticket.id, code: ticket.code, partySize: ticket.partySize },
-    ],
+    events: [joinedEvent(ticket, 'JOIN', now)],
   });
 }
 
@@ -331,15 +342,7 @@ function handleCheckIn(state: VenueState, command: CheckInCommand, now: Timestam
   if (!movedTable.ok) return err(movedTable.error);
 
   // 席との結びつきは残す。外すのはホールドの期限だけ。
-  const seated: Ticket = { ...ticket, ...clearedHoldDeadline(), state: movedTicket.value, seatedAt: now };
-  const occupied: Table = { ...table, status: movedTable.value, statusSince: now };
-  return ok({
-    state: withTicket(withTable(state, occupied), seated),
-    events: [
-      { type: 'TicketSeated', at: now, ticketId: ticket.id, tableId: table.id },
-      { type: 'TableOccupied', at: now, tableId: table.id, occupantTicketId: ticket.id },
-    ],
-  });
+  return ok(seatedDraft(state, ticket, table, movedTicket.value, movedTable.value, now));
 }
 
 /**
@@ -391,6 +394,305 @@ function vacateTable(state: VenueState, ticket: Ticket, now: Timestamp): Outcome
       { type: 'TableVacated', at: now, tableId: table.id, vacatedByTicketId: ticket.id, freeAt },
     ],
   });
+}
+
+// ---- 座席 QR の分岐（全体プラン 7.8、7.12、7.11 の 3 層目） ----
+
+/**
+ * 案内する席を変える（7.8 の 2 行目）。
+ *
+ * 呼び出しは続いたまま、席だけが移る。**期限は動かさない。** すでに新しい席の
+ * 前に立っている人が、さらに時間を得る理由が無いためである。
+ */
+function handleSwapTable(state: VenueState, command: SwapTableCommand, now: Timestamp): Outcome {
+  const found = requireCalledAt(state, command.ticketId, command.tableId);
+  if (!found.ok) return err(found.error);
+  const { ticket, table } = found.value;
+
+  const moved = ticketTransition({ state, ticket, now, table }, 'SWAP_TABLE');
+  if (!moved.ok) return err(moved.error);
+  const held = tableTransition({ state, table, now }, 'HOLD');
+  if (!held.ok) return err(held.error);
+
+  const released = releaseHeldTable(state, ticket, now);
+  if (!released.ok) return err(released.error);
+
+  const next: Table = { ...table, status: held.value, statusSince: now, occupantTicketId: ticket.id };
+  const swapped: Ticket = { ...ticket, state: moved.value, tableId: table.id };
+  return ok({
+    state: withTicket(withTable(released.value.state, next), swapped),
+    events: [...swappedEvents(ticket, table.id, now), ...released.value.events],
+  });
+}
+
+/** 席を移したことを、移り先と移り元の両方から記録する（移り元は呼び出し側）。 */
+function swappedEvents(ticket: Ticket, toTableId: TableId, now: Timestamp): readonly DomainEvent[] {
+  return [
+    {
+      type: 'TicketSwapped',
+      at: now,
+      ticketId: ticket.id,
+      fromTableId: ticket.tableId ?? toTableId,
+      toTableId,
+    },
+    { type: 'TableHeld', at: now, tableId: toTableId, heldForTicketId: ticket.id },
+  ];
+}
+
+/**
+ * 呼び出しを待たずに座る（7.8 の 4 行目）。
+ *
+ * **待ち順序を崩さない条件つき。** その席にいま割り当てるとしたら自分が選ばれる
+ * 場合だけ通る（`earlyCheckInAllowed`）。
+ */
+function handleCheckInEarly(state: VenueState, command: CheckInEarlyCommand, now: Timestamp): Outcome {
+  const found = requireTicketAndTable(state, command.ticketId, command.tableId);
+  if (!found.ok) return err(found.error);
+  const { ticket, table } = found.value;
+
+  const moved = ticketTransition({ state, ticket, now, table }, 'CHECK_IN_EARLY');
+  if (!moved.ok) return err(moved.error);
+  const occupied = tableTransition({ state, table, now }, 'CHECK_IN_EARLY');
+  if (!occupied.ok) return err(occupied.error);
+
+  return ok(seatedDraft(state, ticket, table, moved.value, occupied.value, now));
+}
+
+/**
+ * 飛び込み着席（7.12、7.8 の 6 行目）。
+ *
+ * 待ち行列を経ずにチケットを作り、いきなり着席させる。
+ *
+ * **受付の開閉は見ない。** 受付を閉じたあとでも、その席が使われていることを
+ * 記録できるほうが状態は正確になる（7.12 の (a)）。待ち行列にも入らないので
+ * `maxQueueLength` にも触れない。
+ */
+function handleWalkIn(state: VenueState, command: WalkInCommand, now: Timestamp): Outcome {
+  if (findTicket(state, command.ticketId) !== undefined) {
+    return err(rejection('TICKET_ALREADY_EXISTS', 'その ID のチケットはすでにある'));
+  }
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const problem: Rejection | null = checkWalkInSize(table, command.partySize);
+  if (problem !== null) return err(problem);
+
+  const allocation = allocateTicketCode(state);
+  if (allocation === null) return err(rejection('NO_CODE_AVAILABLE', '発行できる表示コードが残っていない'));
+
+  const occupied = tableTransition({ state, table, now }, 'WALK_IN');
+  if (!occupied.ok) return err(occupied.error);
+  return ok(walkInDraft(state, command, allocation, table, occupied.value, now));
+}
+
+/** 飛び込みの人数。**その席の定員だけを見る**（施設全体の上限ではない）。 */
+function checkWalkInSize(table: Table, partySize: number): Rejection | null {
+  if (!Number.isInteger(partySize)) return rejection('PARTY_SIZE_INVALID', '人数は整数であること');
+  if (partySize < 1) return rejection('PARTY_TOO_SMALL', '人数は 1 以上であること');
+  if (!fitsCapacity(table, partySize)) {
+    return rejection('PARTY_TOO_LARGE', `この席は ${table.capacity} 名まで（受付でご登録ください）`);
+  }
+  return null;
+}
+
+function walkInDraft(
+  state: VenueState,
+  command: WalkInCommand,
+  allocation: CodeAllocation,
+  table: Table,
+  to: TableStatus,
+  now: Timestamp,
+): Draft {
+  const ticket: Ticket = walkInTicket(command, allocation.code, table.id, now);
+  const occupied: Table = { ...table, status: to, statusSince: now, occupantTicketId: ticket.id };
+  const seated: VenueState = {
+    ...withTable(state, occupied),
+    tickets: [...state.tickets, ticket],
+    nextCodeSeq: allocation.nextSeq,
+  };
+  return {
+    state: seated,
+    events: [joinedEvent(ticket, 'WALK_IN', now), ...seatedEvents(ticket.id, table.id, now)],
+  };
+}
+
+/** 飛び込みのチケット。待ち行列を経ないので、いきなり着席から始まる。 */
+function walkInTicket(
+  command: WalkInCommand,
+  code: TicketCode,
+  tableId: TableId,
+  now: Timestamp,
+): Ticket {
+  return {
+    ...createTicket({ id: command.ticketId, code, partySize: command.partySize, now }),
+    state: TICKET_INITIAL_STATES.WALK_IN,
+    tableId,
+    seatedAt: now,
+  };
+}
+
+/** チケットが作られたことを伝える。受付からでも飛び込みでも同じ形。 */
+function joinedEvent(ticket: Ticket, origin: TicketOrigin, now: Timestamp): DomainEvent {
+  return {
+    type: 'TicketJoined',
+    at: now,
+    ticketId: ticket.id,
+    code: ticket.code,
+    partySize: ticket.partySize,
+    origin,
+  };
+}
+
+/**
+ * 案内された席に誰かが座っていた（7.8 の 10 行目）。
+ *
+ * 席は「誰かが使っているが誰かは分からない」に落とし、本人は待ちに戻す。
+ * **受付時刻はそのまま**で、さらに同時刻の他者より前に出す。案内した側の
+ * 落ち度なので、順番で埋め合わせる。
+ */
+function handleReportTaken(state: VenueState, command: ReportTakenCommand, now: Timestamp): Outcome {
+  const found = requireCalledAt(state, command.ticketId, command.tableId);
+  if (!found.ok) return err(found.error);
+  const { ticket, table } = found.value;
+  if (ticket.tableId !== table.id) {
+    return err(rejection('NOT_ALLOWED_IN_STATE', '自分に案内された席ではない'));
+  }
+
+  const moved = ticketTransition({ state, ticket, now, table }, 'REPORT_TAKEN');
+  if (!moved.ok) return err(moved.error);
+  const taken = tableTransition({ state, table, now }, 'REPORT_TAKEN');
+  if (!taken.ok) return err(taken.error);
+
+  const occupied: Table = { ...table, status: taken.value, statusSince: now, occupantTicketId: null };
+  const requeued: Ticket = { ...ticket, ...clearedHold(), state: moved.value, conflictPriority: true };
+  return ok({
+    state: withTicket(withTable(state, occupied), requeued),
+    events: reportedInUseEvents(ticket, table.id, now),
+  });
+}
+
+/** 使用中だと報告されたことと、報告した人の繰り上げ。 */
+function reportedInUseEvents(ticket: Ticket, tableId: TableId, now: Timestamp): readonly DomainEvent[] {
+  return [
+    { type: 'TableReportedInUse', at: now, tableId, reportedByTicketId: ticket.id },
+    requeuedEvent(ticket.id, ticket.priorityAt, 'seat_taken', now),
+  ];
+}
+
+/**
+ * この席は使用中だ、という報告（7.11 の 3 層目）。
+ *
+ * 「空いている可能性が高い席」に案内された人が押す「使用中」。報告した人が
+ * 待っている人なら、席が塞がっていた人と同じ埋め合わせ（繰り上げ）を受ける。
+ * 第三者やスタッフの報告では席だけが動く。
+ */
+function handleReportInUse(state: VenueState, command: ReportInUseCommand, now: Timestamp): Outcome {
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const moved = tableTransition({ state, table, now }, 'REPORT_IN_USE');
+  if (!moved.ok) return err(moved.error);
+  const occupied: Table = { ...table, status: moved.value, statusSince: now, occupantTicketId: null };
+
+  const reporter = command.ticketId === null ? null : findTicket(state, command.ticketId);
+  const events: DomainEvent[] = [
+    { type: 'TableReportedInUse', at: now, tableId: table.id, reportedByTicketId: reporter?.id ?? null },
+  ];
+  if (reporter === undefined) return err(rejection('TICKET_NOT_FOUND', 'そのチケットは存在しない'));
+  if (reporter === null) return ok({ state: withTable(state, occupied), events });
+
+  const allowed: Rejection | null = checkAppliesTo(reporter, CONFLICT_PRIORITY_APPLIES_TO, '使用中の報告');
+  if (allowed !== null) return err(allowed);
+  const prioritised: Ticket = { ...reporter, conflictPriority: true };
+  events.push(requeuedEvent(reporter.id, reporter.priorityAt, 'seat_taken', now));
+  return ok({ state: withTicket(withTable(state, occupied), prioritised), events });
+}
+
+/**
+ * この席は空いている、という報告（7.8 の 9 行目、7.11 の 3〜4 層目）。
+ *
+ * 誰が座っているか分かっている席（`OCCUPIED`）には遷移が宣言されていないので、
+ * 第三者が着席中の人を追い出すことはできない。
+ */
+function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: Timestamp): Outcome {
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const moved = tableTransition({ state, table, now }, 'CONFIRM_FREE');
+  if (!moved.ok) return err(moved.error);
+
+  const freed: Table = {
+    ...table,
+    status: moved.value,
+    statusSince: now,
+    occupantTicketId: null,
+    // 人が見て空だと確かめた。席の並び順で、いちばん確からしい空席になる（7.6）。
+    verifiedFreeAt: now,
+  };
+  return ok({
+    state: withTable(state, freed),
+    events: [{ type: 'TableFreed', at: now, tableId: table.id, releasedTicketId: null }],
+  });
+}
+
+function requeuedEvent(
+  ticketId: TicketId,
+  priorityAt: Timestamp,
+  reason: 'no_show' | 'seat_taken',
+  now: Timestamp,
+): DomainEvent {
+  return { type: 'TicketRequeued', at: now, ticketId, priorityAt, reason };
+}
+
+/** 着席した状態の下書き。前倒しの着席と、呼び出しからの着席で共通。 */
+function seatedDraft(
+  state: VenueState,
+  ticket: Ticket,
+  table: Table,
+  to: TicketState,
+  tableTo: TableStatus,
+  now: Timestamp,
+): Draft {
+  const seated: Ticket = { ...ticket, ...clearedHoldDeadline(), state: to, tableId: table.id, seatedAt: now };
+  const occupied: Table = { ...table, status: tableTo, statusSince: now, occupantTicketId: ticket.id };
+  return {
+    state: withTicket(withTable(state, occupied), seated),
+    events: seatedEvents(ticket.id, table.id, now),
+  };
+}
+
+/** 着席したことを、チケットの側と席の側の両方から記録する。 */
+function seatedEvents(ticketId: TicketId, tableId: TableId, now: Timestamp): readonly DomainEvent[] {
+  return [
+    { type: 'TicketSeated', at: now, ticketId, tableId },
+    { type: 'TableOccupied', at: now, tableId, occupantTicketId: ticketId },
+  ];
+}
+
+interface TicketAndTable {
+  readonly ticket: Ticket;
+  readonly table: Table;
+}
+
+function requireTicketAndTable(
+  state: VenueState,
+  ticketId: TicketId,
+  tableId: TableId,
+): Result<TicketAndTable, Rejection> {
+  const found = requireTicket(state, ticketId);
+  if (!found.ok) return err(found.error);
+  const table: Table | undefined = findTable(state, tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+  return ok({ ticket: found.value, table });
+}
+
+/** 呼び出し中の人と、読み取った席。 */
+function requireCalledAt(
+  state: VenueState,
+  ticketId: TicketId,
+  tableId: TableId,
+): Result<TicketAndTable, Rejection> {
+  return requireTicketAndTable(state, ticketId, tableId);
 }
 
 // ---- 人数の変更（全体プラン 7.6 のエッジケース） ----
@@ -461,6 +763,12 @@ function route(state: VenueState, command: Command, now: Timestamp): Outcome {
     case 'PASS': return handlePass(state, command, now);
     case 'CHECK_IN': return handleCheckIn(state, command, now);
     case 'CHECK_OUT': return handleCheckOut(state, command, now);
+    case 'SWAP_TABLE': return handleSwapTable(state, command, now);
+    case 'CHECK_IN_EARLY': return handleCheckInEarly(state, command, now);
+    case 'WALK_IN': return handleWalkIn(state, command, now);
+    case 'REPORT_TAKEN': return handleReportTaken(state, command, now);
+    case 'REPORT_IN_USE': return handleReportInUse(state, command, now);
+    case 'CONFIRM_FREE': return handleConfirmFree(state, command, now);
     case 'CHANGE_PARTY_SIZE': return handleChangePartySize(state, command, now);
     case 'HEARTBEAT': return handleHeartbeat(state, command, now);
   }

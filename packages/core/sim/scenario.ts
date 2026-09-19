@@ -56,6 +56,22 @@ export interface Scenario {
    * それまでは、この値を下げると席が詰まっていく様子がそのまま出る。
    */
   readonly checkoutReportRate: number;
+  /**
+   * 登録せずに席へ向かう人（8.1「無断利用」）。1 卓 1 時間あたりの件数。
+   *
+   * 空席があるあいだに一定率で起きる。**このうち一部は座席 QR を読んで
+   * 登録する**（7.12 の飛び込み着席）。読まない人は、システムから見えないまま
+   * 席を使う「ゴースト」になる。
+   */
+  readonly unregisteredPerTableHour: number;
+  /**
+   * 登録せずに席へ向かった人のうち、座席 QR を読む割合（7.12）。
+   *
+   * **8.1 に数字が無い。** 7.12 は「登録しない理由を減らす」ことを狙いとして
+   * いるが、どれだけ減るかは掲示と QR の置き方しだいで、現地観察と実証実験で
+   * しか分からない。半々を初期値に置き、感度を見る。
+   */
+  readonly walkInShare: number;
   /** 受付を開けておく時間。ここを過ぎた到着は受け付けない。 */
   readonly joinOpenFor: DurationMs;
   readonly policy: Policy;
@@ -180,6 +196,12 @@ export const NO_SHOW: NoShowModel = { baseRate: 0.08, longWaitFromMin: 20, longW
 /** 退席の申告率: 60%。 */
 export const CHECKOUT_REPORT_RATE = 0.6;
 
+/** 無断利用: ピーク時 1 卓あたり 0.2 件/時（8.1）。 */
+export const UNREGISTERED_PER_TABLE_HOUR = 0.2;
+
+/** そのうち座席 QR を読む割合。**8.1 に無い。現地観察で置き換える。** */
+export const WALK_IN_SHARE = 0.5;
+
 // ---- 既定のシナリオ ----
 
 interface ScenarioParams {
@@ -204,6 +226,8 @@ function scenario(params: ScenarioParams): Scenario {
     walk: WALK,
     noShow: NO_SHOW,
     checkoutReportRate: CHECKOUT_REPORT_RATE,
+    unregisteredPerTableHour: UNREGISTERED_PER_TABLE_HOUR,
+    walkInShare: WALK_IN_SHARE,
     joinOpenFor: arrivalWindow(params.arrivals),
     policy: DEFAULT_POLICY,
   };
@@ -277,4 +301,14 @@ export function withPolicy(base: Scenario, policy: Policy): Scenario {
 /** 退席の申告率を差し替えたシナリオを作る。 */
 export function withCheckoutReportRate(base: Scenario, rate: number): Scenario {
   return { ...base, checkoutReportRate: rate };
+}
+
+/** 座席 QR を読む割合を差し替えたシナリオを作る（7.12 の効きを見る）。 */
+export function withWalkInShare(base: Scenario, share: number): Scenario {
+  return { ...base, walkInShare: share };
+}
+
+/** 無断利用の率を差し替えたシナリオを作る。 */
+export function withUnregisteredRate(base: Scenario, perTableHour: number): Scenario {
+  return { ...base, unregisteredPerTableHour: perTableHour };
 }

@@ -47,12 +47,8 @@ describe('実装の進み具合', () => {
    * 残っているガードの数を明示して、増えないようにする。
    * PR 12 でここが空になる（`ticket-machine.ts` の冒頭の約束）。
    */
-  it('チケットのガードは 10 個中 7 個が実装済み', () => {
-    expect([...unimplementedTicketGuards()].sort()).toEqual([
-      'earlyCheckInAllowed',
-      'hardLimitMode',
-      'swapAllowed',
-    ]);
+  it('チケットのガードは 10 個中 9 個が実装済み（残るのは着席時間の上限）', () => {
+    expect([...unimplementedTicketGuards()].sort()).toEqual(['hardLimitMode']);
   });
 
   it('席のガードは 3 個中 2 個が実装済み（残るのは確認要の自動解放）', () => {

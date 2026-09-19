@@ -9,9 +9,10 @@
  * 2. `tick` を呼ぶ
  * 3. 出てきたイベントを見て、次の行動を予定に入れる
  *
- * 利用者が出すコマンドは 5 つ。受付（`JOIN`）、向かっています（`EXTEND`）、
- * 準備OK（`READY`）、着席（`CHECK_IN`）、退席（`CHECK_OUT`）。譲る（`PASS`）は
- * 8.1 に率が無いので出さない。
+ * 利用者が出すコマンドは 7 つ。受付（`JOIN`）、向かっています（`EXTEND`）、
+ * 準備OK（`READY`）、着席（`CHECK_IN`）、退席（`CHECK_OUT`）、飛び込み着席
+ * （`WALK_IN`）、誰かが座っていた（`REPORT_TAKEN`）。譲る（`PASS`）と席の変更
+ * （`SWAP_TABLE`）は 8.1 に率が無いので出さない。
  *
  * **利用者はイベントに反応する。** 呼び出されたことを知るのは `TicketCalled`
  * が出たときで、それは Phase 2 のサーバが通知を出すのと同じ形である。
@@ -50,10 +51,11 @@ import {
   seconds,
   tick,
 } from '../src/index.js';
-import { createParty, decidesNoShow, type Party } from './agent.js';
+import { createParty, createSitter, decidesNoShow, type Party, type Sitter } from './agent.js';
 import { arrivalTimes } from './distributions.js';
 import { streamFor } from './rng.js';
 import type { Scenario, TableSpec } from './scenario.js';
+import type { DurationMs } from '../src/index.js';
 
 /** `tick` を呼ぶ間隔。全体プラン 9.4 が定める 10 秒に合わせる。 */
 export const TICK_INTERVAL = seconds(10);
@@ -81,6 +83,8 @@ export interface RunResult {
   readonly events: readonly DomainEvent[];
   /** 到着した組。到着しなかった（受付時間外の）組は含まない。 */
   readonly parties: readonly Party[];
+  /** 登録せずに席へ向かった人のうち、実際に席に着けた人（8.1「無断利用」）。 */
+  readonly sitters: readonly Sitter[];
   /** 投入したコマンドの数。 */
   readonly commands: number;
   /** `tick` を呼んだ回数。 */
@@ -179,14 +183,32 @@ export function run(options: RunOptions): RunResult {
   const endsAt: Timestamp = SIM_EPOCH + scenario.joinOpenFor + cooldown;
 
   const parties: readonly Party[] = plannedParties(scenario, seed);
+  const sitters: readonly Sitter[] = plannedSitters(scenario, seed, endsAt - SIM_EPOCH);
   const schedule = new Schedule();
   for (const party of parties) schedule.add(party.arriveAt, joinCommand(party));
 
-  const world = new World(scenario, parties, schedule);
+  const world = new World(scenario, parties, sitters, schedule);
   for (let now: Timestamp = SIM_EPOCH; now <= endsAt; now += TICK_INTERVAL) {
     world.step(now);
   }
   return world.finish(seed, endsAt);
+}
+
+/**
+ * 登録せずに席へ向かう人を、シナリオの率から作る（8.1「無断利用」）。
+ *
+ * 率は 1 卓 1 時間あたりなので、卓数を掛けて施設全体の率にする。
+ * **空席があるかどうかは、そのときになってみないと分からない**ので、ここでは
+ * 候補の時刻だけを並べ、席が見つかるかは走らせながら決める。
+ */
+function plannedSitters(scenario: Scenario, seed: number, until: DurationMs): readonly Sitter[] {
+  const tables: number = scenario.tables.reduce((sum, spec) => sum + spec.count, 0);
+  const perHour: number = scenario.unregisteredPerTableHour * tables;
+  if (perHour <= 0) return [];
+
+  const rng = streamFor(seed, 'sitters', 0);
+  const offsets = arrivalTimes(rng, [{ from: 0, perHour }], until);
+  return offsets.map((offset, index) => createSitter(seed, index, SIM_EPOCH + offset, scenario));
 }
 
 /** 到着する組を、シナリオの到着率から作る。 */
@@ -218,14 +240,29 @@ class World {
   private readonly appliedAt: Timestamp[] = [];
   /** 呼ばれたときに「行かない」と決めた人。保留に戻されても呼び直しを求めない。 */
   private readonly givenUp = new Set<string>();
+  /** 登録せずに来て、実際に席に着けた人。 */
+  private readonly seated: Sitter[] = [];
   private ticks = 0;
+
+  /**
+   * システムから見えないまま使われている席と、空くまでの時刻。
+   *
+   * **シミュレータだけが知っている事実**である。core には現れない。ここに
+   * 載っている席へ案内された人は「誰かが座っています」と報告することになる
+   * （7.8 の 10 行目）。
+   */
+  private readonly ghosts = new Map<string, Timestamp>();
+  /** まだ席を探していない、登録せずに来た人。 */
+  private pendingSitters: readonly Sitter[];
 
   constructor(
     private readonly scenario: Scenario,
     private readonly parties: readonly Party[],
+    sitters: readonly Sitter[],
     private readonly schedule: Schedule,
   ) {
     this.state = openVenue(scenario);
+    this.pendingSitters = sitters;
   }
 
   /** 1 刻み進める。予定されている行動を出してから、時計を進める。 */
@@ -233,7 +270,52 @@ class World {
     for (const item of this.schedule.take(now)) {
       this.send(item.command, item.at);
     }
+    this.releaseGhosts(now);
+    this.seatSitters(now);
     this.advance(now);
+  }
+
+  /**
+   * 登録せずに来た人を、空いている席に座らせる（8.1「無断利用」、7.12）。
+   *
+   * 座席 QR を読む人は飛び込み着席として登録され、読まない人はシステムから
+   * 見えないまま座る。**空席が無ければ、その人は諦めて去る**（待ち行列には
+   * 並ばない。並ぶ人は `parties` の側でモデル化している）。
+   */
+  private seatSitters(now: Timestamp): void {
+    const due = this.pendingSitters.filter((sitter) => sitter.arriveAt <= now);
+    this.pendingSitters = this.pendingSitters.filter((sitter) => sitter.arriveAt > now);
+    for (const sitter of due) this.seatSitter(sitter, now);
+  }
+
+  private seatSitter(sitter: Sitter, now: Timestamp): void {
+    const table = this.state.tables.find(
+      (item) =>
+        item.enabled &&
+        item.status === 'FREE' &&
+        !this.ghosts.has(item.id) &&
+        sitter.partySize <= item.capacity,
+    );
+    if (table === undefined) return;
+
+    if (sitter.scans) {
+      this.send(
+        { type: 'WALK_IN', ticketId: sitter.ticketId, tableId: table.id, partySize: sitter.partySize },
+        now,
+      );
+      this.seated.push(sitter);
+      return;
+    }
+    // 読まない人。システムからは空席のまま、実際には使われている。
+    this.ghosts.set(table.id, now + sitter.stay);
+    this.seated.push(sitter);
+  }
+
+  /** 見えないまま使われていた席から人が去る。席の記録はそのまま残る。 */
+  private releaseGhosts(now: Timestamp): void {
+    for (const [tableId, until] of [...this.ghosts]) {
+      if (until <= now) this.ghosts.delete(tableId);
+    }
   }
 
   private send(command: Command, at: Timestamp): void {
@@ -287,7 +369,12 @@ class World {
       this.givenUp.add(ticketId);
       return;
     }
-    this.schedule.add(now + party.walk, { type: 'CHECK_IN', ticketId, tableId: this.seatOf(ticketId) });
+    const tableId: string = this.seatOf(ticketId);
+    // 席に着いてみて、誰かが座っていれば報告する（7.8 の 10 行目）。
+    const command: Command = this.ghosts.has(tableId)
+      ? { type: 'REPORT_TAKEN', ticketId, tableId }
+      : { type: 'CHECK_IN', ticketId, tableId };
+    this.schedule.add(now + party.walk, command);
   }
 
   /**
@@ -338,6 +425,7 @@ class World {
       state: this.state,
       events: this.log,
       parties: this.parties,
+      sitters: this.seated,
       commands: this.appliedAt.length,
       ticks: this.ticks,
       defects: this.defects,
