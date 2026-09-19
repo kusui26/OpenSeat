@@ -207,13 +207,32 @@ function calledScan(context: ScanContext): TableScanOutcome {
 /** 待っている人（7.8 の 4、7.11 の 3 層目）。 */
 function waitingScan(context: ScanContext): TableScanOutcome {
   const { table } = context;
-  if (table.status === 'NEEDS_CHECK') {
-    // 空いていれば「空席」、使われていれば「使用中」。後者は繰り上げを受ける。
-    return outcome('needs_check', table.id, ['CONFIRM_FREE', 'REPORT_IN_USE'], null, false);
-  }
+  if (table.status === 'NEEDS_CHECK') return uncertainScan(context);
   return guardPasses(context, 'earlyCheckInAllowed')
     ? outcome('early_check_in', table.id, ['CHECK_IN_EARLY'], null, false)
     : outcome('keep_waiting', table.id, NO_ACTIONS, null, false);
+}
+
+/**
+ * 「空いている可能性が高い席」に来た人（7.11 の 3 層目）。
+ *
+ * 画面に出す言葉は同じでも、押せるものが 2 通りある。
+ *
+ * | 誰か | 空いていたとき | 使われていたとき |
+ * |---|---|---|
+ * | この席を案内された人 | `CHECK_IN_EARLY`（そのまま座る） | `REPORT_IN_USE` |
+ * | それ以外の待っている人 | `CONFIRM_FREE`（空席として知らせる） | `REPORT_IN_USE` |
+ *
+ * **案内された人だけがそのまま座れる。** 7.11 は「着席されれば解消」と書いて
+ * おり、確かめに行った人がその席を得られなければ「歩き回って探す」より悪く
+ * なってしまう。座れば、ほかの誰かに渡る隙が無い。
+ */
+function uncertainScan(context: ScanContext): TableScanOutcome {
+  const { table } = context;
+  const actions: readonly CommandType[] = guardPasses(context, 'earlyCheckInAllowed')
+    ? ['CHECK_IN_EARLY', 'REPORT_IN_USE']
+    : ['CONFIRM_FREE', 'REPORT_IN_USE'];
+  return outcome('needs_check', table.id, actions, null, false);
 }
 
 // ---- 入口 ----

@@ -222,8 +222,13 @@ describe('一周が回る', () => {
 });
 
 describe('ノーショーと遅刻', () => {
+  /**
+   * **短いシナリオでは見られない。** ノーショーは 1 組ずつの引きなので、
+   * 1 時間ぶん（10 組ほど）では「たまたま全員が間に合った」が普通に起きる。
+   * 率が効いていることを見るには、3 時間半ぶんの組数が要る。
+   */
   it('呼ばれても来ない人がいる（8.1 のノーショー率）', () => {
-    const result = run({ scenario: withCheckoutReportRate(SHORT, 1), seed: 31 });
+    const result = run({ scenario: withCheckoutReportRate(WEEKEND_PEAK, 1), seed: 31 });
     expect(countOf(result, 'TicketReminded')).toBeGreaterThan(0);
     expect(countOf(result, 'TicketPaused')).toBeGreaterThan(0);
   });
@@ -361,34 +366,112 @@ describe('完了条件（Phase 1 プラン PR 8）', () => {
   });
 });
 
-describe('この版の限界（PR 10 で解消する）', () => {
+describe('整合性の回復が効いていること（7.10、7.11）', () => {
   /**
-   * **退席を申告しない人の席は戻らない。**
+   * **PR 8 が数字で示した限界が解消した。**
    *
-   * 8.1 は申告率 60% を置き、申告しない人は「p90 の問いかけ → 無応答 →
-   * 確認要」の経路を通るとしている（7.11 の 2 と 5）。その経路は PR 10 で
-   * 実装するので、いまは席が埋まったまま残る。**シミュレータはその様子を
-   * 隠さずに出す。** これが PR 10 を待つ理由を数字で示している。
+   * 8.1 の退席申告率 60% をそのまま回すと、PR 9 までは 8 卓すべてが埋まった
+   * まま戻らず、47 組中 7 組しか使い終わらなかった。7.11 の 3 つの層（問いかけ、
+   * 確認要の席の案内、時間経過による整理）が入って、**50 組中 39 組が使い終わる
+   * ようになった。**
    */
-  it('申告率 60% だと、席が埋まったまま戻らなくなる', () => {
+  it('申告率 60%（8.1 の値）でも、席が回るようになった', () => {
     const result = run({ scenario: WEEKEND_PEAK, seed: 2026 });
-    const stuck = result.state.tables.filter((table) => table.status === 'OCCUPIED');
-    expect(stuck.length).toBe(result.state.tables.length);
+    const done = result.state.tickets.filter((ticket) => ticket.state === 'DONE');
+    expect(done.length).toBeGreaterThan(35);
+    expect(countOf(result, 'TicketSeated')).toBeGreaterThan(40);
   });
 
-  it('申告率 100% なら、最後には席が空く', () => {
+  it('申告しなかった人の席は、問いかけと時間経過で取り戻される', () => {
+    const result = run({ scenario: WEEKEND_PEAK, seed: 2026 });
+    expect(countOf(result, 'StillHereAsked')).toBeGreaterThan(0);
+    expect(countOf(result, 'TableNeedsCheck')).toBeGreaterThan(0);
+    const reclaimed = result.state.tickets.filter((ticket) => ticket.endReason === 'auto_release');
+    expect(reclaimed.length).toBeGreaterThan(0);
+  });
+
+  it('申告率が高いほど、取り戻しに頼らずに済む', () => {
+    const lazy = run({ scenario: WEEKEND_PEAK, seed: 2026 });
+    const diligent = run({ scenario: withCheckoutReportRate(WEEKEND_PEAK, 1), seed: 2026 });
+    expect(countOf(diligent, 'TableNeedsCheck')).toBeLessThan(countOf(lazy, 'TableNeedsCheck'));
+  });
+
+  it('申告率 100% でも、最後には席が空く', () => {
     const result = run({ scenario: withCheckoutReportRate(WEEKEND_PEAK, 1), seed: 2026 });
-    const free = result.state.tables.filter((table) => table.status === 'FREE');
-    expect(free.length).toBeGreaterThan(0);
+    expect(result.state.tables.filter((table) => table.status === 'FREE').length).toBeGreaterThan(0);
   });
 
-  it('申告率が下がるほど、使い終わる人が減る', () => {
-    const counts = [1, 0.6, 0.2].map(
-      (rate) => run({ scenario: withCheckoutReportRate(SHORT, rate), seed: 55 }).state.tickets.filter(
-        (ticket) => ticket.endReason === 'checked_out',
-      ).length,
+  /**
+   * **自動解放を切ると、席が永久に塞がりうる。**
+   *
+   * 7.11 の 5 層目が「最悪でも席が永久に塞がらない」と書いている保証は、
+   * `needs_check_auto_free_min` を入れたときにだけ成り立つ。切った施設では
+   * スタッフの確認を待つことになる。
+   */
+  it('自動解放を切ると、確認要の席が残ったままになる', () => {
+    const manual: Scenario = withPolicy(WEEKEND_PEAK, {
+      ...DEFAULT_POLICY,
+      needsCheckAutoFreeMin: null,
+    });
+    const result = run({ scenario: manual, seed: 2026 });
+    const stuck = result.state.tables.filter((table) => table.status === 'NEEDS_CHECK');
+    expect(stuck.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 確認要の席を次の利用者に委ねる（7.11 の 3 層目）。
+ *
+ * **これは「30 分待って自動で戻す」より速い経路である。** 5 層目だけでも席は
+ * いつか戻るが、そのあいだ席は空いたまま誰も座れない。見に行ける人がいるなら、
+ * その人に確かめてもらったほうが早い。
+ */
+describe('確認要の席を次の人に委ねる（7.11 の 3 層目）', () => {
+  const SEEDS: readonly number[] = [2026, 7, 99, 31];
+
+  /** 案内を切った施設。ほかの条件は 8.1 のまま。 */
+  const off: Scenario = withPolicy(WEEKEND_PEAK, { ...DEFAULT_POLICY, assignNeedsCheck: false });
+
+  function finished(result: RunResult): number {
+    return result.state.tickets.filter((ticket) => ticket.state === 'DONE').length;
+  }
+
+  /** 呼ばれずに座った、並んでいた人。この版では 3 層目の案内しか経路が無い。 */
+  function seatedWithoutCall(result: RunResult): number {
+    const skip = new Set<string>();
+    let seated = 0;
+
+    for (const event of result.events) {
+      if (event.type === 'TicketCalled') skip.add(event.ticketId);
+      if (event.type === 'TicketJoined' && event.origin === 'WALK_IN') skip.add(event.ticketId);
+      if (event.type === 'TicketSeated' && !skip.has(event.ticketId)) seated += 1;
+    }
+    return seated;
+  }
+
+  it.each(SEEDS)('種 %i で、案内を出すほうが多くの組が使い終わる', (seed) => {
+    expect(finished(run({ scenario: WEEKEND_PEAK, seed }))).toBeGreaterThan(
+      finished(run({ scenario: off, seed })),
     );
-    expect(counts[0]).toBeGreaterThan(counts[1] ?? 0);
-    expect(counts[1]).toBeGreaterThan(counts[2] ?? 0);
+  });
+
+  it('案内された人が、呼ばれないまま席に着いている', () => {
+    expect(seatedWithoutCall(run({ scenario: WEEKEND_PEAK, seed: 2026 }))).toBeGreaterThan(0);
+  });
+
+  it('案内を切れば、呼ばれずに座る人はいなくなる', () => {
+    expect(seatedWithoutCall(run({ scenario: off, seed: 2026 }))).toBe(0);
+  });
+
+  it('使用中だったときは報告になり、その人は次の席で繰り上げを受ける', () => {
+    const result = run({ scenario: WEEKEND_PEAK, seed: 31 });
+    expect(countOf(result, 'TableReportedInUse')).toBeGreaterThan(0);
+    expect(countOf(result, 'TicketRequeued')).toBeGreaterThan(0);
+  });
+
+  it('案内を出しても、実装の誤りを示す拒否は出ない', () => {
+    for (const seed of SEEDS) {
+      expect(run({ scenario: WEEKEND_PEAK, seed }).defects).toEqual([]);
+    }
   });
 });

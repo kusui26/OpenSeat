@@ -18,18 +18,21 @@
  * | 席の期限（片付けの猶予など） | `apply` と `tick` の両方（ここ） | 席には意思が無い。時計が進めば必ず明けているので、競合しない。**割当の前に明かしておかないと、空いているはずの席が次の人に渡らない** |
  */
 
-import { findTable, withTable, type VenueState } from '../domain/state.js';
+import { findTable, findTicket, withTable, withTicket, type VenueState } from '../domain/state.js';
 import type { Table } from '../domain/table.js';
+import type { Ticket } from '../domain/ticket.js';
+import type { TicketId } from '../domain/ids.js';
 import type { Decision } from '../decision.js';
 import { checkInvariants, formatViolations } from '../invariant.js';
 import { err, ok, type Result } from '../result.js';
 import { reached, type Timestamp } from '../time.js';
 import { runAllocation } from './allocate.js';
-import { turnoverEndsAt } from './deadlines.js';
+import { autoFreeAt, turnoverEndsAt, unknownAgedAt } from './deadlines.js';
 import type { DomainEvent } from './events.js';
 import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
 import { rejection, type Rejection } from './rejection.js';
-import { tableTransition } from './transition.js';
+import { endedTicket } from './release.js';
+import { tableTransition, ticketTransition } from './transition.js';
 
 /** 組み立てただけの変更。まだ割当も検査も通っていない。 */
 export type Draft = Decision<VenueState, DomainEvent>;
@@ -44,10 +47,11 @@ const MAX_CHAIN = 8;
 /**
  * 席に起きること。
  *
- * いまは片付けの猶予が明けることだけ。整合性の回復（PR 10）で、上限超過・
- * 無断利用の経過・確認要の自動解放が加わる。
+ * 片付けの猶予が明けること（7.6）と、整合性の回復の 5 層目（7.11）。
+ * 着席中の席が「確認要」に落ちるのは、利用者の操作と競合するのでチケット側
+ * （`tick.ts`）が見る。
  */
-type TableDueKind = 'TURNOVER_DONE';
+type TableDueKind = 'TURNOVER_DONE' | 'UNKNOWN_AGED' | 'AUTO_FREE';
 
 interface TableDue {
   readonly kind: TableDueKind;
@@ -64,6 +68,8 @@ interface TableDue {
 function tableDeadlinesOf(state: VenueState, table: Table): readonly TableDue[] {
   const candidates: readonly (readonly [TableDueKind, Timestamp | null])[] = [
     ['TURNOVER_DONE', turnoverEndsAt(table, state.policy)],
+    ['UNKNOWN_AGED', unknownAgedAt(table, state.policy)],
+    ['AUTO_FREE', autoFreeAt(table, state.policy)],
   ];
   return candidates
     .filter((entry): entry is readonly [TableDueKind, Timestamp] => entry[1] !== null)
@@ -105,10 +111,94 @@ function finishTurnover(state: VenueState, table: Table, now: Timestamp): Outcom
   return ok({ state: withTable(state, next), events: [happened] });
 }
 
+/**
+ * 無断利用の想定滞在時間が過ぎた（7.11 の 5 層目）。
+ *
+ * 誰が使っているか分からないまま置かれていた席を「たぶん空いている」に
+ * 落とす。次の利用者かスタッフが確かめれば解消する。
+ */
+function ageUnknown(state: VenueState, table: Table, now: Timestamp): Outcome {
+  const moved = tableTransition({ state, table, now }, 'UNKNOWN_AGED');
+  if (!moved.ok) return err(moved.error);
+  const uncertain: Table = { ...table, status: moved.value, statusSince: now };
+  return ok({
+    state: withTable(state, uncertain),
+    events: [
+      { type: 'TableNeedsCheck', at: now, tableId: table.id, reason: 'unknown_aged', occupantTicketId: null },
+    ],
+  });
+}
+
+/**
+ * 「確認要」のまま放置された席を、自動で空席に戻す（7.11 の 5 層目）。
+ *
+ * **これが「最悪でも席が永久に塞がらない」を支えている唯一の仕掛けである。**
+ * `needsCheckAutoFreeMin` を `null` にすると働かず、スタッフの確認を待つことに
+ * なる（ガード `autoFreeEnabled`）。
+ *
+ * 着席中のチケットが結びついたままなら、**その人は申告せずに去ったものとして
+ * 扱い**、チケットも終わらせる。残すと席とチケットの対応が壊れる。
+ */
+function autoFree(state: VenueState, table: Table, now: Timestamp): Outcome {
+  const moved = tableTransition({ state, table, now }, 'AUTO_FREE');
+  if (!moved.ok) return err(moved.error);
+
+  const freed: Table = {
+    ...table,
+    status: moved.value,
+    statusSince: now,
+    occupantTicketId: null,
+    verifiedFreeAt: now,
+  };
+  const reclaimed = reclaimSeat(withTable(state, freed), table.occupantTicketId, now);
+  if (!reclaimed.ok) return err(reclaimed.error);
+  return ok({
+    state: reclaimed.value.state,
+    events: [
+      { type: 'TableFreed', at: now, tableId: table.id, releasedTicketId: null },
+      ...reclaimed.value.events,
+    ],
+  });
+}
+
+/**
+ * 席を回収された人のチケットを終わらせる。誰も居なければ何もしない。
+ *
+ * **「申告せずに去った」と見なす道が 3 つある。** 自動解放（ここ、7.11 の 5 層目）、
+ * 次の利用者が空席だと確かめたとき、スタッフが空席だと確かめたとき
+ * （どちらも `apply.ts` の `CONFIRM_FREE` と `CHECK_IN_EARLY`）。**どれも同じ
+ * 終わり方（`auto_release`）にしてある。** 席を空ける根拠が時間か人かの違いで、
+ * 本人にとって起きたことは同じだからである。
+ */
+export function reclaimSeat(state: VenueState, ticketId: TicketId | null, now: Timestamp): Outcome {
+  const ticket: Ticket | undefined = ticketId === null ? undefined : findTicket(state, ticketId);
+  if (ticket === undefined) return ok({ state, events: [] });
+
+  const moved = ticketTransition({ state, ticket, now, table: null }, 'SEAT_RECLAIMED');
+  if (!moved.ok) return err(moved.error);
+  return ok({
+    state: withTicket(state, endedTicket(ticket, moved.value, 'auto_release', now)),
+    events: [
+      {
+        type: 'TicketEnded',
+        at: now,
+        ticketId: ticket.id,
+        endReason: 'auto_release',
+        by: null,
+        cancelReason: null,
+      },
+    ],
+  });
+}
+
 function settleTableDue(state: VenueState, table: Table, due: TableDue, now: Timestamp): Outcome {
   switch (due.kind) {
     case 'TURNOVER_DONE':
       return finishTurnover(state, table, now);
+    case 'UNKNOWN_AGED':
+      return ageUnknown(state, table, now);
+    case 'AUTO_FREE':
+      return autoFree(state, table, now);
   }
 }
 

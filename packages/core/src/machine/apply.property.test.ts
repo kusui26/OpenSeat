@@ -139,6 +139,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: ticketIdArb, partySize: fc.integer({ min: 0, max: 6 }) })
     .map((fields): Command => ({ type: 'CHANGE_PARTY_SIZE', ...fields })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'STILL_HERE', ticketId })),
 );
 
 const scenarioArb = fc.record({

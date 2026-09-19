@@ -46,8 +46,16 @@ export type TableEvent = (typeof TABLE_EVENTS)[number];
  * | `disableAfterCurrent` | 対象外にする操作が保留されている（7.6 のエッジケース） |
  * | `stillManaged` | 対象外の予約が無く、引き続き管理対象である |
  * | `autoFreeEnabled` | `needsCheckAutoFreeMin` が設定されている（null なら自動解放しない） |
+ * | `seatHasOccupant` | その席に着席中のチケットが結びついたまま残っている |
+ * | `seatIsUnoccupied` | 結びついたチケットが無い。`seatHasOccupant` の裏返し |
  */
-export const TABLE_GUARDS = ['disableAfterCurrent', 'stillManaged', 'autoFreeEnabled'] as const;
+export const TABLE_GUARDS = [
+  'disableAfterCurrent',
+  'stillManaged',
+  'autoFreeEnabled',
+  'seatHasOccupant',
+  'seatIsUnoccupied',
+] as const;
 
 export type TableGuard = (typeof TABLE_GUARDS)[number];
 
@@ -279,11 +287,35 @@ export const TABLE_TRANSITIONS = [
   },
   {
     from: 'NEEDS_CHECK',
-    on: 'REPORT_IN_USE',
-    to: 'OCCUPIED_UNKNOWN',
+    on: 'CHECK_OUT',
+    to: 'TURNOVER',
     guard: null,
     source: '7.11',
-    note: '次に案内された人が「使用中だった」と報告した',
+    note: '確認要に落ちていた席の利用者が、退席を申告した。退席ボタンは常に押せる',
+  },
+  {
+    from: 'NEEDS_CHECK',
+    on: 'REPORT_IN_USE',
+    to: 'OCCUPIED_UNKNOWN',
+    guard: 'seatIsUnoccupied',
+    source: '7.11',
+    note: '次に案内された人が「使用中だった」と報告した。誰が使っているかは分からない',
+  },
+  {
+    from: 'NEEDS_CHECK',
+    on: 'REPORT_IN_USE',
+    to: 'OCCUPIED',
+    guard: 'seatHasOccupant',
+    source: '7.11',
+    note: '使用中だったが、この席には着席中の記録が残っている。その人が居たと分かった',
+  },
+  {
+    from: 'NEEDS_CHECK',
+    on: 'CHECK_IN_EARLY',
+    to: 'OCCUPIED',
+    guard: null,
+    source: '7.11',
+    note: '案内された人が着いてみると空いていたので、そのまま座った（3 層目の解消）',
   },
   {
     from: 'NEEDS_CHECK',

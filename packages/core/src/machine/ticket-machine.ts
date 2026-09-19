@@ -35,6 +35,8 @@ export const TICKET_EVENTS = [
   'CANCEL',
   'CHECK_OUT',
   'AUTO_RELEASE',
+  'SEAT_RECLAIMED',
+  'STILL_HERE',
   'VENUE_RELEASE',
 ] as const;
 
@@ -301,6 +303,22 @@ export const TICKET_TRANSITIONS = [
     guard: 'hardLimitMode',
     source: '7.10',
     note: '着席時間の上限を超え、hard モードで自動的に終了した',
+  },
+  {
+    from: 'SEATED',
+    on: 'SEAT_RECLAIMED',
+    to: 'DONE',
+    guard: null,
+    source: '7.11',
+    note: '確認要のまま時間が過ぎ、席が空席に戻された。申告せずに去ったものとして扱う',
+  },
+  {
+    from: 'SEATED',
+    on: 'STILL_HERE',
+    to: 'SEATED',
+    guard: null,
+    source: '7.11',
+    note: '「まだご利用中ですか」に答えた。利用は続く',
   },
   {
     from: 'SEATED',

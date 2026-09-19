@@ -16,6 +16,7 @@
  */
 
 import { candidatesFor, pickCandidate } from '../allocation/choose.js';
+import { guidedTo } from '../allocation/needs-check.js';
 import { fitsCapacity, satisfiesTags, type Table } from '../domain/table.js';
 import type { VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
@@ -49,7 +50,7 @@ type TicketGuardPredicate = (context: TicketGuardContext) => boolean;
 /**
  * 実装済みのチケットのガード。
  *
- * 残るのは `hardLimitMode`（着席時間の上限・PR 10）だけ。
+ * **この版ですべて実装済みになった。**
  */
 const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardPredicate>>> = {
   /** 案内しようとしている席に人数が収まり、希望タグを満たすか（7.6）。 */
@@ -66,7 +67,7 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
   isAssignedTable: ({ ticket, table }) => table !== null && ticket.tableId === table.id,
 
   /**
-   * 呼び出しを待たずに座ってよいか（7.8 の 4 行目）。
+   * 呼び出しを待たずに座ってよいか（7.8 の 4 行目、7.11 の 3 層目）。
    *
    * 7.8 の条件は「空席で、人数が収まり、**この席を待つ人が他にいない**」。
    * 最後の条件をそのまま「ほかに収まる人が 1 人もいない」と読むと、混んでいる
@@ -74,12 +75,14 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
    * 「待ち順序を崩さない」ことなので、**いまこの席に割り当てるとしたら自分が
    * 選ばれるか**で判定する。割当の選択（7.6）をそのまま使うので、前倒しで
    * 座っても順番は 1 つも動かない。
+   *
+   * **「確認要」の席にも同じ扉を開けてある。** 7.11 の 3 層目で案内された人が
+   * 着いてみて空いていたときの道で、7.11 の「空いていれば着席の QR を」
+   * 「着席されれば解消」がこれにあたる。案内を出す式（`suggestNeedsCheck`）と
+   * ここが同じ関数を見ているので、**案内された本人だけが座れる。**
    */
   earlyCheckInAllowed: ({ ticket, state, table }) =>
-    table !== null &&
-    table.status === 'FREE' &&
-    table.enabled &&
-    pickCandidate(candidatesFor(table, state.tickets), table, state.policy)?.ticket.id === ticket.id,
+    table !== null && table.enabled && seatIsOffered(state, ticket, table),
 
   /** 別の空席へ移ってよいか（7.8 の 2 行目）。 */
   swapAllowed: ({ state, ticket, table }) =>
@@ -106,6 +109,15 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
     (state.policy.noShowPolicy === 'requeue_once' && ticket.noShows >= 1),
 
   /**
+   * 着席時間の上限を、自動解放まで効かせる設定か（7.10）。
+   *
+   * `soft` と `hard` の違いはここだけ。席はどちらも「確認要」に落ちるが、
+   * **チケットを終わらせるのは `hard` だけ**である。自動解放は物理的な退席を
+   * 伴わないため、次の人を「まだ座っている席」に案内する事故を生む（7.10）。
+   */
+  hardLimitMode: ({ state }) => state.policy.timeLimitMode === 'hard',
+
+  /**
    * 通知手段を持っていないか（7.9）。
    *
    * 「接続が切れてから何分たったか」はここでは見ない。**時間の経過は期限が
@@ -115,11 +127,7 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
   noNotificationChannel: ({ ticket }) => !ticket.hasNotificationChannel,
 };
 
-/**
- * 実装済みの席のガード。
- *
- * 残る `autoFreeEnabled` は「確認要」の自動解放（PR 10）で使う。
- */
+/** 実装済みの席のガード。**この版ですべて実装済みになった。** */
 const TABLE_GUARD_PREDICATES: Partial<
   Readonly<Record<TableGuard, (context: TableGuardContext) => boolean>>
 > = {
@@ -128,7 +136,40 @@ const TABLE_GUARD_PREDICATES: Partial<
 
   /** 対象外の予約が無く、引き続き管理対象か。`disableAfterCurrent` の裏返し。 */
   stillManaged: ({ table }) => !table.disableAfterCurrent,
+
+  /**
+   * 「確認要」の席を自動で空席に戻す設定か（7.11 の 5 層目）。
+   *
+   * `null` なら戻さない。**切るとスタッフが確認するまで席が塞がる。**
+   */
+  autoFreeEnabled: ({ state }) => state.policy.needsCheckAutoFreeMin !== null,
+
+  /**
+   * その席に、着席中のチケットが結びついたまま残っているか（7.11）。
+   *
+   * 「確認要」に落ちた席には 2 通りある。**誰が使っているか分からない席**
+   * （無断利用が時間で落ちてきたもの）と、**着席の記録が残っている席**
+   * （申告せずに去ったか、まだ座っているかが分からないもの）である。
+   * 第三者から「使用中だった」と報告されたときの行き先が、これで変わる。
+   */
+  seatHasOccupant: ({ table }) => table.occupantTicketId !== null,
+
+  /** 結びついたチケットが無いか。`seatHasOccupant` の裏返し。 */
+  seatIsUnoccupied: ({ table }) => table.occupantTicketId === null,
 };
+
+/**
+ * その席が、その人に差し出されているか。
+ *
+ * 空席なら通常の割当（7.6）で選ばれるかどうか、「確認要」なら 7.11 の 3 層目で
+ * 案内されているかどうか。**どちらも「いま案内するなら誰か」を問うている。**
+ */
+function seatIsOffered(state: VenueState, ticket: Ticket, table: Table): boolean {
+  if (table.status === 'FREE') {
+    return pickCandidate(candidatesFor(table, state.tickets), table, state.policy)?.ticket.id === ticket.id;
+  }
+  return table.status === 'NEEDS_CHECK' && guidedTo(state, ticket.id, table.id);
+}
 
 /** そのガードの判定が書かれているか。 */
 export function ticketGuardIsImplemented(guard: TicketGuard): boolean {

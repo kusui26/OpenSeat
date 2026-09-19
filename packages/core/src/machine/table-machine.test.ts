@@ -39,8 +39,9 @@ const DIAGRAM_ARROWS: readonly (readonly [TableStatus, TableStatus, string])[] =
   ['TURNOVER', 'FREE', '片付け猶予経過'],
   ['TURNOVER', 'DISABLED', '対象外の予約／運用終了／全席解放'],
   ['NEEDS_CHECK', 'FREE', 'スタッフ確認／次の人の「空いていた」／放置の自動解放'],
-  ['NEEDS_CHECK', 'OCCUPIED', '本人の「まだ利用中」'],
-  ['NEEDS_CHECK', 'OCCUPIED_UNKNOWN', '次に案内された人の「使用中だった」'],
+  ['NEEDS_CHECK', 'TURNOVER', '本人の退席申告'],
+  ['NEEDS_CHECK', 'OCCUPIED', '本人の「まだ利用中」／第三者の「使用中だった」／案内された人の着席'],
+  ['NEEDS_CHECK', 'OCCUPIED_UNKNOWN', '次に案内された人の「使用中だった」（誰の記録も無い席）'],
   ['NEEDS_CHECK', 'DISABLED', '運用終了／全席解放'],
 ];
 
@@ -57,8 +58,8 @@ describe('遷移表と全体プラン 7.4 の図の対応', () => {
     expect(extra.map((row) => `${row.from}->${row.to}（${row.on}）`)).toEqual([]);
   });
 
-  it('表は 28 本の遷移を宣言している', () => {
-    expect(TABLE_TRANSITIONS).toHaveLength(28);
+  it('表は 31 本の遷移を宣言している', () => {
+    expect(TABLE_TRANSITIONS).toHaveLength(31);
   });
 });
 

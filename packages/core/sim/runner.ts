@@ -9,10 +9,11 @@
  * 2. `tick` を呼ぶ
  * 3. 出てきたイベントを見て、次の行動を予定に入れる
  *
- * 利用者が出すコマンドは 7 つ。受付（`JOIN`）、向かっています（`EXTEND`）、
+ * 利用者が出すコマンドは 10 個。受付（`JOIN`）、向かっています（`EXTEND`）、
  * 準備OK（`READY`）、着席（`CHECK_IN`）、退席（`CHECK_OUT`）、飛び込み着席
- * （`WALK_IN`）、誰かが座っていた（`REPORT_TAKEN`）。譲る（`PASS`）と席の変更
- * （`SWAP_TABLE`）は 8.1 に率が無いので出さない。
+ * （`WALK_IN`）、誰かが座っていた（`REPORT_TAKEN`）、まだ利用中（`STILL_HERE`）、
+ * 確認要の席に座る（`CHECK_IN_EARLY`）、使用中だった（`REPORT_IN_USE`）。
+ * 譲る（`PASS`）と席の変更（`SWAP_TABLE`）は 8.1 に率が無いので出さない。
  *
  * **利用者はイベントに反応する。** 呼び出されたことを知るのは `TicketCalled`
  * が出たときで、それは Phase 2 のサーバが通知を出すのと同じ形である。
@@ -49,6 +50,7 @@ import {
   isDefect,
   minutes,
   seconds,
+  suggestNeedsCheck,
   tick,
 } from '../src/index.js';
 import { createParty, createSitter, decidesNoShow, type Party, type Sitter } from './agent.js';
@@ -146,6 +148,13 @@ export function openVenue(scenario: Scenario, now: Timestamp = SIM_EPOCH): Venue
 }
 
 // ---- 予定表 ----
+
+/** 確認要の席を見に行く人。着いた時点で、空いているかどうかが分かる。 */
+interface Visit {
+  readonly at: Timestamp;
+  readonly ticketId: string;
+  readonly tableId: string;
+}
 
 /**
  * 予定表。時刻の順、同じ時刻なら入れた順に取り出す。
@@ -255,6 +264,19 @@ class World {
   /** まだ席を探していない、登録せずに来た人。 */
   private pendingSitters: readonly Sitter[];
 
+  /**
+   * 席に着いた人が、実際に立ち上がる時刻。
+   *
+   * **シミュレータだけが知っている事実**である。退席を申告しない人の席は、
+   * core から見れば使用中のままだが、現実にはこの時刻に空いている。
+   * 「確認要の席を見に行ったら空いていたか」を、ここで判定する。
+   */
+  private readonly leavesAt = new Map<string, Timestamp>();
+  /** 確認要の席を見に行く人。歩いている途中の人がここに入る。 */
+  private visits: readonly Visit[] = [];
+  /** 一度見に行った（人、席）の組。同じ席を何度も往復させない。 */
+  private readonly checked = new Set<string>();
+
   constructor(
     private readonly scenario: Scenario,
     private readonly parties: readonly Party[],
@@ -272,7 +294,64 @@ class World {
     }
     this.releaseGhosts(now);
     this.seatSitters(now);
+    this.arriveAtUncertain(now);
     this.advance(now);
+    this.followSuggestions(now);
+  }
+
+  /**
+   * 「空いている可能性が高い席」を知らされた人が、見に行く（7.11 の 3 層目）。
+   *
+   * **誰が案内されるかは core に聞く。** シミュレータが独自に選ぶと、画面が
+   * 出すものと違う筋書きを試してしまう。歩く時間は呼び出しのときと同じ。
+   *
+   * 来る気のある人は行くものとしている（`onReminded` と同じ考え方で、画面に
+   * 出ているものを、待っている人が無視する理由が無い）。**一度見た席には
+   * 戻らない。** 使用中だったと報告した席が、また案内されて往復になるのを
+   * 避けるためである。
+   */
+  private followSuggestions(now: Timestamp): void {
+    for (const suggestion of suggestNeedsCheck(this.state)) {
+      const key = `${suggestion.ticketId}:${suggestion.tableId}`;
+      if (this.checked.has(key) || this.givenUp.has(suggestion.ticketId)) continue;
+      const party = this.partyOf(suggestion.ticketId);
+      if (party === undefined) continue;
+
+      this.checked.add(key);
+      this.visits = [...this.visits, { at: now + party.walk, ...suggestion }];
+    }
+  }
+
+  /**
+   * 見に行った人が席に着く。**そこで初めて、空いているかどうかが分かる。**
+   *
+   * 歩いているあいだに席の状態は変わりうる（自動解放された、ほかの人が確かめた、
+   * 本人が別の席へ呼ばれた）。着いた時点で確かめ直す。
+   */
+  private arriveAtUncertain(now: Timestamp): void {
+    const arrived = this.visits.filter((visit) => visit.at <= now);
+    this.visits = this.visits.filter((visit) => visit.at > now);
+    for (const visit of arrived) this.lookAtSeat(visit, now);
+  }
+
+  private lookAtSeat(visit: Visit, now: Timestamp): void {
+    const table = this.state.tables.find((item) => item.id === visit.tableId);
+    if (table === undefined || table.status !== 'NEEDS_CHECK') return;
+    if (findTicket(this.state, visit.ticketId)?.state !== 'WAITING') return;
+
+    const command: Command = this.stillThere(table, now)
+      ? { type: 'REPORT_IN_USE', ticketId: visit.ticketId, tableId: table.id }
+      : { type: 'CHECK_IN_EARLY', ticketId: visit.ticketId, tableId: table.id };
+    this.send(command, now);
+  }
+
+  /** その席に、いま実際に人が座っているか。シミュレータだけが知っている。 */
+  private stillThere(table: Table, now: Timestamp): boolean {
+    if (this.ghosts.has(table.id)) return true;
+    const occupant: string | null = table.occupantTicketId;
+    if (occupant === null) return false;
+    const leaves: Timestamp | undefined = this.leavesAt.get(occupant);
+    return leaves !== undefined && leaves > now;
   }
 
   /**
@@ -352,6 +431,7 @@ class World {
     if (event.type === 'TicketReminded') this.onReminded(event.ticketId, now);
     if (event.type === 'TicketPaused' && event.reason === 'no_show') this.onMissed(event.ticketId, now);
     if (event.type === 'TicketSeated') this.onSeated(event.ticketId, now);
+    if (event.type === 'StillHereAsked') this.onAsked(event.ticketId, now);
   }
 
   /**
@@ -402,11 +482,37 @@ class World {
     this.schedule.add(now, { type: 'READY', ticketId });
   }
 
-  /** 着席した。滞在が終わったら退席を申告する（申告する人だけ）。 */
+  /**
+   * 着席した。滞在が終わったら退席を申告する（申告する人だけ）。
+   *
+   * 並んで着席した人も、飛び込んだ人も同じように扱う。申告しない人の席は、
+   * 整合性の回復（7.11）が拾うまで埋まったままになる。
+   */
   private onSeated(ticketId: string, now: Timestamp): void {
-    const party = this.partyOf(ticketId);
-    if (party === undefined || !party.reportsCheckout) return;
-    this.schedule.add(now + party.stay, { type: 'CHECK_OUT', ticketId, by: 'user' });
+    const occupant = this.occupantOf(ticketId);
+    if (occupant === undefined) return;
+    // 申告するかどうかに関わらず、この時刻には立ち上がっている。
+    this.leavesAt.set(ticketId, now + occupant.stay);
+    if (!occupant.reportsCheckout) return;
+    this.schedule.add(now + occupant.stay, { type: 'CHECK_OUT', ticketId, by: 'user' });
+  }
+
+  /**
+   * 「まだご利用中ですか」が届いた（7.11 の 2 層目）。
+   *
+   * **退席を申告する人は答える。申告しない人は答えない。** 8.1 が
+   * 「申告なしは p90 の問いかけ → 無応答 → 確認要の経路を通る」と書いている
+   * とおりで、同じ「アプリに反応するかどうか」がどちらも決めている。
+   */
+  private onAsked(ticketId: string, now: Timestamp): void {
+    const occupant = this.occupantOf(ticketId);
+    if (occupant === undefined || !occupant.reportsCheckout) return;
+    this.schedule.add(now, { type: 'STILL_HERE', ticketId });
+  }
+
+  /** 席に着いている人。並んだ人でも、飛び込んだ人でもよい。 */
+  private occupantOf(ticketId: string): { readonly stay: number; readonly reportsCheckout: boolean } | undefined {
+    return this.partyOf(ticketId) ?? this.seated.find((sitter) => sitter.ticketId === ticketId);
   }
 
   /** そのチケットにいま割り当てられている席。無ければ空文字（拒否される）。 */

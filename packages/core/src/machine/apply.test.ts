@@ -232,12 +232,17 @@ describe('遷移の段（手順 2・3）', () => {
     if (!moved.ok) expect(moved.error.code).toBe('NOT_ALLOWED_IN_STATE');
   });
 
-  it('判定がまだ書かれていないガードは、通らずに GUARD_NOT_IMPLEMENTED になる', () => {
+  /**
+   * 宣言されたガードがすべて実装されたので、`GUARD_NOT_IMPLEMENTED` はもう
+   * 出ない。**仕掛けは残してある。** 遷移を足してガードを書き忘れたときに、
+   * 黙って通らないための備えである（`guards.test.ts` が残りを数えている）。
+   */
+  it('未実装のガードはもう無いので、拒否の理由は「条件を満たさない」になる', () => {
     const seated: Ticket = { ...ticketOf(state, 'k1'), state: 'SEATED', tableId: 'tb-2', seatedAt: NOW };
     const moved = ticketTransition({ state, ticket: seated, now: NOW, table: null }, 'AUTO_RELEASE');
     expect(moved.ok).toBe(false);
     if (!moved.ok) {
-      expect(moved.error.code).toBe('GUARD_NOT_IMPLEMENTED');
+      expect(moved.error.code).toBe('BLOCKED_BY_GUARD');
       expect(moved.error.describe).toContain('hardLimitMode');
     }
   });

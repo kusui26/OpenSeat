@@ -25,11 +25,12 @@
  * この性質（時間の飛ばし方によらず同じ状態に落ち着く）は PR 12 で検証する。
  */
 
-import { findTicket, withTicket, type VenueState } from '../domain/state.js';
+import { findTable, findTicket, withTable, withTicket, type VenueState } from '../domain/state.js';
+import type { Table } from '../domain/table.js';
 import type { Ticket } from '../domain/ticket.js';
 import type { Decision } from '../decision.js';
 import { err, ok, type Result } from '../result.js';
-import { hasPassed, type Timestamp } from '../time.js';
+import { hasPassed, minutes, type Timestamp } from '../time.js';
 import { pausedDraft } from './apply.js';
 import { settle, type Draft, type Outcome } from './settle.js';
 import {
@@ -37,13 +38,17 @@ import {
   holdExpiresAt,
   holdReminderAt,
   maxAgeAt,
+  overstayAt,
   pauseExpiresAt,
+  stillHereAskAt,
+  stillHereTimeoutAt,
+  timeLimitNoticeAt,
 } from './deadlines.js';
-import type { DomainEvent } from './events.js';
+import type { DomainEvent, NeedsCheckReason } from './events.js';
 import { rejection, type Rejection } from './rejection.js';
 import { endedTicket, releaseHeldTable } from './release.js';
 import type { TicketEvent } from './ticket-machine.js';
-import { ticketTransition } from './transition.js';
+import { tableTransition, ticketTransition } from './transition.js';
 
 /**
  * 時刻が来て起きること。
@@ -51,7 +56,17 @@ import { ticketTransition } from './transition.js';
  * `REMIND` だけは状態を変えず、知らせを出したことを記録する。ほかの 4 つは
  * 遷移表の事象に対応する。
  */
-const DUE_KINDS = ['REMIND', 'HOLD_EXPIRE', 'PAUSE_EXPIRE', 'MAX_AGE', 'ABANDON'] as const;
+const DUE_KINDS = [
+  'REMIND',
+  'HOLD_EXPIRE',
+  'PAUSE_EXPIRE',
+  'MAX_AGE',
+  'ABANDON',
+  'TIME_LIMIT_NOTICE',
+  'STILL_HERE_ASK',
+  'STILL_HERE_TIMEOUT',
+  'OVERSTAY',
+] as const;
 
 type DueKind = (typeof DUE_KINDS)[number];
 
@@ -75,6 +90,10 @@ function deadlinesOf(state: VenueState, ticket: Ticket): readonly Due[] {
     ['PAUSE_EXPIRE', pauseExpiresAt(ticket)],
     ['MAX_AGE', maxAgeAt(ticket, policy)],
     ['ABANDON', abandonedAt(ticket, policy)],
+    ['TIME_LIMIT_NOTICE', timeLimitNoticeAt(ticket, state)],
+    ['STILL_HERE_ASK', stillHereAskAt(ticket, policy)],
+    ['STILL_HERE_TIMEOUT', stillHereTimeoutAt(ticket, state)],
+    ['OVERSTAY', overstayAt(ticket, state)],
   ];
   return candidates
     .filter((entry): entry is readonly [DueKind, Timestamp] => entry[1] !== null)
@@ -209,7 +228,136 @@ function toTicketState(to: string): Ticket['state'] {
   return 'EXPIRED';
 }
 
-/** 1 つの期限を処理する。 */
+// ---- 着席中に起きること（全体プラン 7.10、7.11 の 2 層目） ----
+
+/**
+ * 「目安時間になりました」（7.10 の `soft`）。
+ *
+ * 状態は変えない。出したことを記録して、繰り返さないようにする。
+ * 何組が待っているかを添える。7.10 の文言が「現在 3 組がお待ちです」だから。
+ */
+function noticeTimeLimit(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
+  if (ticket.tableId === null) {
+    return err(rejection('TABLE_NOT_FOUND', '席を持たないチケットに上限は無い'));
+  }
+  const noticed: Ticket = { ...ticket, timeLimitNoticedAt: now };
+  const waitingCount: number = state.tickets.filter((item) => item.state === 'WAITING').length;
+  return ok({
+    state: withTicket(state, noticed),
+    events: [
+      { type: 'TimeLimitReached', at: now, ticketId: ticket.id, tableId: ticket.tableId, waitingCount },
+    ],
+  });
+}
+
+/**
+ * 「まだご利用中ですか」（7.11 の 2 層目）。
+ *
+ * 状態は変えない。1 人につき 1 回だけ出す。答えが無いまま
+ * `stillHereTimeoutMin` が過ぎると、席が「確認要」に落ちる。
+ */
+function askStillHere(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
+  if (ticket.tableId === null) {
+    return err(rejection('TABLE_NOT_FOUND', '席を持たないチケットには問いかけない'));
+  }
+  const asked: Ticket = { ...ticket, stillHereAskedAt: now };
+  const answerBy: Timestamp = now + minutes(state.policy.stillHereTimeoutMin);
+  return ok({
+    state: withTicket(state, asked),
+    events: [
+      { type: 'StillHereAsked', at: now, ticketId: ticket.id, tableId: ticket.tableId, answerBy },
+    ],
+  });
+}
+
+/**
+ * 着席中の席を「確認要」に落とす（7.10 の上限超過、7.11 の 2 層目の無応答）。
+ *
+ * **チケットは終わらせない。** `hard` モードの上限超過だけが例外で、そちらは
+ * ガードが決める。終わらせないのは、「まだ居ます」と答えて戻る道
+ * （`STILL_HERE`）を閉じないためである。
+ */
+function markNeedsCheck(
+  state: VenueState,
+  ticket: Ticket,
+  event: 'OVERSTAY' | 'STILL_HERE_TIMEOUT',
+  reason: NeedsCheckReason,
+  now: Timestamp,
+): Outcome {
+  const table: Table | undefined = ticket.tableId === null ? undefined : findTable(state, ticket.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', '着席中のチケットに席が無い'));
+
+  const marked = uncertainDraft(state, table, ticket, reason, event, now);
+  if (!marked.ok) return err(marked.error);
+  return event === 'OVERSTAY' ? releaseOnHardLimit(marked.value, ticket, now) : ok(marked.value);
+}
+
+/**
+ * 席を「確認要」に落とす。**すでに落ちていれば何もしない。**
+ *
+ * 上限超過と問いかけの無応答は、どちらも同じ状態へ向かう。既定値では
+ * 無応答のほうが先に来るので、上限が来たときにはもう落ちていることがある。
+ */
+function uncertainDraft(
+  state: VenueState,
+  table: Table,
+  ticket: Ticket,
+  reason: NeedsCheckReason,
+  event: 'OVERSTAY' | 'STILL_HERE_TIMEOUT',
+  now: Timestamp,
+): Result<Draft, Rejection> {
+  if (table.status === 'NEEDS_CHECK') return ok({ state, events: [] });
+
+  const moved = tableTransition({ state, table, now }, event);
+  if (!moved.ok) return err(moved.error);
+  const uncertain: Table = { ...table, status: moved.value, statusSince: now };
+  return ok({
+    state: withTable(state, uncertain),
+    events: [
+      { type: 'TableNeedsCheck', at: now, tableId: table.id, reason, occupantTicketId: ticket.id },
+    ],
+  });
+}
+
+/**
+ * `hard` モードだけ、上限超過でチケットも終わらせる（7.10）。
+ *
+ * **席の側の結びつきも外す。** チケットが席を指さなくなるので、席が指したままだと
+ * `table_link_is_mutual` が破れる。席は「確認要」のままで、空席には戻さない
+ * （次の人に「確実な空席」として案内しないため）。
+ */
+function releaseOnHardLimit(marked: Draft, ticket: Ticket, now: Timestamp): Outcome {
+  const moved = ticketTransition(
+    { state: marked.state, ticket, now, table: null },
+    'AUTO_RELEASE',
+  );
+  // ガードが通らない（`soft` と `off`）のは正しい流れなので、席だけを落として終わる。
+  if (!moved.ok) return ok(marked);
+
+  const released: Ticket = endedTicket(ticket, moved.value, 'auto_release', now);
+  const unlinked: VenueState = unlinkTable(marked.state, ticket.tableId);
+  return ok({
+    state: withTicket(unlinked, released),
+    events: [
+      ...marked.events,
+      { type: 'TicketEnded', at: now, ticketId: ticket.id, endReason: 'auto_release', by: null, cancelReason: null },
+    ],
+  });
+}
+
+/** 席から「誰が使っているか」の記録を外す。席の状態は変えない。 */
+function unlinkTable(state: VenueState, tableId: string | null): VenueState {
+  const table: Table | undefined = tableId === null ? undefined : findTable(state, tableId);
+  return table === undefined ? state : withTable(state, { ...table, occupantTicketId: null });
+}
+
+/**
+ * 1 つの期限を処理する。
+ *
+ * 種別ごとに 1 行ずつ並べるだけの分岐なので、この関数だけ長さの制約から外す
+ * （`apply.ts` の `route` と同じ理由）。
+ */
+// eslint-disable-next-line max-lines-per-function
 function settleDue(state: VenueState, ticket: Ticket, due: Due, now: Timestamp): Outcome {
   switch (due.kind) {
     case 'REMIND':
@@ -222,6 +370,14 @@ function settleDue(state: VenueState, ticket: Ticket, due: Due, now: Timestamp):
       return expireTo(state, ticket, 'MAX_AGE', 'max_age', now);
     case 'ABANDON':
       return expireTo(state, ticket, 'ABANDON', 'abandoned', now);
+    case 'TIME_LIMIT_NOTICE':
+      return noticeTimeLimit(state, ticket, now);
+    case 'STILL_HERE_ASK':
+      return askStillHere(state, ticket, now);
+    case 'STILL_HERE_TIMEOUT':
+      return markNeedsCheck(state, ticket, 'STILL_HERE_TIMEOUT', 'no_answer', now);
+    case 'OVERSTAY':
+      return markNeedsCheck(state, ticket, 'OVERSTAY', 'overstay', now);
   }
 }
 

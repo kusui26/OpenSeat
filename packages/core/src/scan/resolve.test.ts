@@ -228,15 +228,40 @@ describe('呼び出しが無効になったあとで席に来た人（7.7 の 8�
 describe('確認要の席（7.11 の 3 層目）', () => {
   const needsCheck = table(SCANNED, 4, { status: 'NEEDS_CHECK' });
 
-  it('待っている人には、空席か使用中かを選ばせる', () => {
+  it('案内された人には、そのまま座るか使用中かを選ばせる', () => {
     const state = venue([needsCheck], [ticket('k1')]);
+    expect(scan(state, 'k1')).toMatchObject({
+      kind: 'needs_check',
+      actions: ['CHECK_IN_EARLY', 'REPORT_IN_USE'],
+    });
+  });
+
+  it('案内されていない人には、空席か使用中かを知らせてもらう', () => {
+    // k1 が案内される（受付が早い）。k2 は同じ席を見に来ただけ。
+    const state = venue([needsCheck], [ticket('k1'), ticket('k2', { createdAt: NOW + minutes(1), priorityAt: NOW + minutes(1) })]);
+    expect(scan(state, 'k2')).toMatchObject({
+      kind: 'needs_check',
+      actions: ['CONFIRM_FREE', 'REPORT_IN_USE'],
+    });
+  });
+
+  it('案内を切っている施設では、待っている人も知らせるだけになる', () => {
+    const state = venue([needsCheck], [ticket('k1')], { ...DEFAULT_POLICY, assignNeedsCheck: false });
     expect(scan(state, 'k1')).toMatchObject({
       kind: 'needs_check',
       actions: ['CONFIRM_FREE', 'REPORT_IN_USE'],
     });
   });
 
-  it('チケットを持たない人にも同じ 2 つを出す', () => {
+  it('確実な空席があるうちは、確認要の席に案内しない', () => {
+    const state = venue([needsCheck, table(OTHER, 4)], [ticket('k1')]);
+    expect(scan(state, 'k1')).toMatchObject({
+      kind: 'needs_check',
+      actions: ['CONFIRM_FREE', 'REPORT_IN_USE'],
+    });
+  });
+
+  it('チケットを持たない人には、空席か使用中かを知らせてもらう', () => {
     expect(scan(venue([needsCheck]), null)).toMatchObject({
       kind: 'needs_check',
       actions: ['CONFIRM_FREE', 'REPORT_IN_USE'],
