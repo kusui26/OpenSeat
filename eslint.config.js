@@ -92,6 +92,28 @@ export default tseslint.config(
     },
   },
 
+  // ---- packages/core/sim はシミュレータ ----
+  // 乱数と時刻を持ってよい層だが、**再現できることが命**なので、
+  // 種から導かない乱数と実時刻だけは禁じる（ADR-0004 の裏返し）。
+  {
+    files: ['packages/core/sim/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'シミュレータは種から導く乱数だけを使う（sim/rng.ts）',
+        },
+        { object: 'Date', property: 'now', message: 'シミュレータは仮想時刻だけを使う' },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        { selector: "NewExpression[callee.name='Date']", message: 'シミュレータは仮想時刻だけを使う' },
+      ],
+    },
+  },
+
   // ---- テスト ----
   // 時刻の偽装や重複した組み立てが必要になるため、長さの制約から外す。
   {

@@ -28,6 +28,19 @@ const FORBIDDEN_IN_CORE = [
   { pattern: /\bconsole\s*\./, reason: '出力は境界側の責務' },
 ];
 
+/**
+ * `packages/core/sim` で使ってはならない記述。
+ *
+ * シミュレータは乱数と時刻を持ってよい層だが、**再現できることが命**である。
+ * 種から導かない乱数や実時刻が混ざると、同じシードで同じ結果にならなくなり、
+ * 方針の比較（全体プラン 8.2）が成り立たない。
+ */
+const FORBIDDEN_IN_SIM = [
+  { pattern: /\bMath\.random\s*\(/, reason: '種から導く乱数だけを使う（sim/rng.ts）' },
+  { pattern: /\bDate\.now\s*\(/, reason: '仮想時刻だけを使う' },
+  { pattern: /\bnew\s+Date\s*\(/, reason: '仮想時刻だけを使う' },
+];
+
 /** ルート層から直接触ってはならないもの。ドメインへの委譲を迂回させない。 */
 const FORBIDDEN_IN_ROUTES = [
   { pattern: /from\s+['"][^'"]*\/db\//, reason: 'ルートから永続化層を直接呼ばない（CLAUDE.md 3.1）' },
@@ -126,6 +139,16 @@ async function checkCorePurity() {
   return problems;
 }
 
+/** シミュレータが再現可能であることを確かめる。 */
+async function checkSimIsReproducible() {
+  const files = await collectSources(join(ROOT, 'packages', 'core', 'sim'));
+  const problems = [];
+  for (const file of files) {
+    problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_SIM));
+  }
+  return problems;
+}
+
 async function checkRouteBoundaries() {
   const files = await collectSources(join(ROOT, 'apps', 'server', 'src', 'routes'));
   const problems = [];
@@ -154,6 +177,7 @@ async function main() {
   let failures = 0;
   failures += report('packages/core が依存ゼロである', await checkCoreHasNoDependencies());
   failures += report('packages/core が純粋である（時刻・乱数・環境・I/O を持たない）', await checkCorePurity());
+  failures += report('packages/core/sim が再現可能である（種から導く乱数と仮想時刻だけ）', await checkSimIsReproducible());
   failures += report('ルート層が永続化層を直接呼んでいない', await checkRouteBoundaries());
 
   if (failures > 0) {

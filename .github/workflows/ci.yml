@@ -69,7 +69,7 @@ jobs:
           # 素の Node スクリプトなので、pnpm を前提にしたキャッシュを無効にする。
           package-manager-cache: false
 
-      - name: 意図的な違反を検知できることを確かめる
+      - name: コアの純粋性の違反を検知できることを確かめる
         run: |
           cat > packages/core/src/__ci_violation.ts <<'EOF'
           export function impure(): number {
@@ -82,3 +82,17 @@ jobs:
           fi
           echo "検査は違反を正しく検知した。"
           rm packages/core/src/__ci_violation.ts
+
+      - name: シミュレータの再現性の違反を検知できることを確かめる
+        run: |
+          cat > packages/core/sim/__ci_violation.ts <<'EOF'
+          export function unreproducible(): number {
+            return Math.random();
+          }
+          EOF
+          if node scripts/check-architecture.mjs; then
+            echo "::error::検査が違反を見逃した。scripts/check-architecture.mjs を確認すること。"
+            exit 1
+          fi
+          echo "検査は違反を正しく検知した。"
+          rm packages/core/sim/__ci_violation.ts
