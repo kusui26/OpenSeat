@@ -23,7 +23,8 @@
  * そこで落ちる。
  *
  * **前提**: `now` は呼び出しのたびに進む（戻らない）。サーバの時計だけを信頼する
- * という設計（全体プラン 9.4）に対応する。
+ * という設計（全体プラン 9.4）に対応する。**この前提は入口で確かめる**ので、
+ * 破ったまま静かに進むことはない（`clock.ts`）。
  */
 
 import {
@@ -43,6 +44,7 @@ import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import { err, ok, type Result } from '../result.js';
 import { minutes, type Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
+import { checkClock } from './clock.js';
 import { leaveService, reclaimSeat, settle, type Draft, type Outcome } from './settle.js';
 import { closeVenue, openVenue, releaseAll } from './venue.js';
 import {
@@ -971,6 +973,9 @@ export function apply(
   command: Command,
   now: Timestamp,
 ): Result<Decision<VenueState, DomainEvent>, Rejection> {
+  const wentBackward: Rejection | null = checkClock(state, now);
+  if (wentBackward !== null) return err(wentBackward);
+
   const drafted: Outcome = route(state, command, now);
   if (!drafted.ok) return drafted;
   return settle(drafted.value, now);

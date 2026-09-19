@@ -32,6 +32,7 @@ import type { Decision } from '../decision.js';
 import { err, ok, type Result } from '../result.js';
 import { hasPassed, minutes, type Timestamp } from '../time.js';
 import { pausedDraft } from './apply.js';
+import { checkClock } from './clock.js';
 import { settle, type Draft, type Outcome } from './settle.js';
 import { closeVenue, endForClose } from './venue.js';
 import {
@@ -269,6 +270,8 @@ function askStillHere(state: VenueState, ticket: Ticket, now: Timestamp): Outcom
   if (ticket.tableId === null) {
     return err(rejection('TABLE_NOT_FOUND', '席を持たないチケットには問いかけない'));
   }
+  // **答えの記録は消さない。** 上限の超過を抑えるのに要る（`deadlines.ts` の
+  // `presenceConfirmedAfter`）。答えたかどうかは、問いかけとの前後で判定する。
   const asked: Ticket = { ...ticket, stillHereAskedAt: now };
   const answerBy: Timestamp = now + minutes(state.policy.stillHereTimeoutMin);
   return ok({
@@ -363,10 +366,12 @@ function unlinkTable(state: VenueState, tableId: string | null): VenueState {
 /**
  * 1 つの期限を処理する。
  *
- * 種別ごとに 1 行ずつ並べるだけの分岐なので、この関数だけ長さの制約から外す
- * （`apply.ts` の `route` と同じ理由）。
+ * 種別ごとに 1 行ずつ並べるだけの分岐で、絡んだ条件は無い。分岐の数がそのまま
+ * 複雑度と行数として数えられるが、分けても読みやすくならないのでこの関数だけ
+ * 外す（`apply.ts` の `route` と同じ理由）。書き忘れは
+ * `switch-exhaustiveness-check` が捕まえる。
  */
-// eslint-disable-next-line max-lines-per-function
+// eslint-disable-next-line complexity, max-lines-per-function
 function settleDue(state: VenueState, ticket: Ticket, due: Due, now: Timestamp): Outcome {
   switch (due.kind) {
     case 'VENUE_CLOSE':
@@ -478,6 +483,9 @@ export function tick(
   state: VenueState,
   now: Timestamp,
 ): Result<Decision<VenueState, DomainEvent>, Rejection> {
+  const wentBackward: Rejection | null = checkClock(state, now);
+  if (wentBackward !== null) return err(wentBackward);
+
   const ids: readonly string[] = state.tickets.map((ticket) => ticket.id);
   let current: VenueState = state;
   const events: DomainEvent[] = [];

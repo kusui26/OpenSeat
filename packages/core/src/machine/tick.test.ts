@@ -3,9 +3,9 @@ import type { Decision, Tick } from '../decision.js';
 import { DEFAULT_POLICY, type NoShowPolicy, type Policy } from '../domain/policy.js';
 import { createTable, type Table } from '../domain/table.js';
 import type { Ticket } from '../domain/ticket.js';
-import { createVenueState, findTable, findTicket, type VenueState } from '../domain/state.js';
+import { createVenueState, findTable, findTicket, sameVenueState, type VenueState } from '../domain/state.js';
 import type { Result } from '../result.js';
-import { minutes, type Timestamp } from '../time.js';
+import { minutes, seconds, type Timestamp } from '../time.js';
 import { apply } from './apply.js';
 import type { Command } from './command.js';
 import type { DomainEvent, DomainEventType } from './events.js';
@@ -503,7 +503,8 @@ describe('tick そのもの', () => {
     const state = join(crowded(), 'k1', 4);
     const decided = expectOk(tick(state, at(1)));
     expect(decided.events).toEqual([]);
-    expect(decided.state).toEqual(state);
+    // 時計の刻みだけは進む（9.4）。ほかは何も変わらない。
+    expect(decided.state).toEqual({ ...state, clockAt: at(1) });
   });
 
   it('渡した状態を書き換えない', () => {
@@ -544,6 +545,199 @@ describe('tick そのもの', () => {
 
   it('チケットが 1 枚も無くても動く', () => {
     const empty = venue();
-    expect(expectOk(tick(empty, at(60))).state).toEqual(empty);
+    expect(expectOk(tick(empty, at(60))).state).toEqual({ ...empty, clockAt: at(60) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * 大きな時間の飛び（全体プラン 9.4、Phase 1 プラン PR 12）。
+ *
+ * サーバの再起動やスケジューラの遅れで、`tick` は 10 秒ではなく 1 時間ぶん
+ * 飛ぶことがある。**飛んでも取りこぼさない**ことを、10 秒刻みで 360 回進めた
+ * 場合と 1 回で進めた場合を並べて確かめる。
+ */
+describe('大きな時間の飛び（9.4）', () => {
+  /** `from` から `to` まで 10 秒ごとに進める。実運用と同じ刻み。 */
+  function everyTenSeconds(state: VenueState, from: Timestamp, to: Timestamp): VenueState {
+    let current: VenueState = state;
+    let calls = 0;
+    for (let now: Timestamp = from; now <= to; now += seconds(10)) {
+      current = expectOk(tick(current, now)).state;
+      calls += 1;
+    }
+    expect(calls).toBe(361);
+    return current;
+  }
+
+  /** 空席が無い施設で、呼ばれた人が来ないまま 1 時間が過ぎる。 */
+  function noShowScenario(policy: Policy): { readonly built: VenueState; readonly from: Timestamp } {
+    const state = venue(policy, [table('tb-4', 4), table('tb-2', 2, { status: 'OCCUPIED_UNKNOWN' })]);
+    const built = join(state, 'k1', 3, NOW, true);
+    expect(ticketOf(built, 'k1').state).toBe('CALLED');
+    return { built, from: NOW };
+  }
+
+  /**
+   * **刻み方によらず、同じ終わり方に落ち着く。**
+   *
+   * 呼び出し → ホールドの期限切れ → 保留 → 保留の期限切れ → 終了、と 3 つの
+   * 期限が連鎖する筋書き。まとめて 1 回で処理しても、10 秒ごとに 361 回
+   * 処理しても、同じところへ落ちる。
+   */
+  it('1 時間を 361 回に分けて進めても、1 回で進めても同じ状態になる', () => {
+    const quiet: Policy = { ...DEFAULT_POLICY, ticketMaxAgeMin: 600, timeLimitMode: 'off' };
+    const { built, from } = noShowScenario(quiet);
+    const to: Timestamp = from + minutes(60);
+
+    const stepped = everyTenSeconds(built, from, to);
+    const jumped = expectOk(tick(built, to)).state;
+    expect(sameVenueState(stepped, jumped)).toBe(true);
+  });
+
+  it('そのとき、終わり方も同じになる', () => {
+    const quiet: Policy = { ...DEFAULT_POLICY, ticketMaxAgeMin: 600, timeLimitMode: 'off' };
+    const { built, from } = noShowScenario(quiet);
+    const to: Timestamp = from + minutes(60);
+
+    const jumped = expectOk(tick(built, to)).state;
+    expect(ticketOf(jumped, 'k1').state).toBe('EXPIRED');
+    expect(ticketOf(jumped, 'k1').endReason).toBe('pause_expired');
+    expect(ticketOf(everyTenSeconds(built, from, to), 'k1').endReason).toBe('pause_expired');
+  });
+
+  /**
+   * **期限は、その期限の時刻で刻まれる。** 1 時間後に気づいても、7 分で切れた
+   * ホールドは「7 分に切れた」として扱う。現在時刻で刻むと、そこから置かれる
+   * 次の期限が現在時刻より先になり、連鎖が途切れる。
+   */
+  it('飛ばして処理しても、刻まれる時刻は期限の時刻になる', () => {
+    const quiet: Policy = { ...DEFAULT_POLICY, ticketMaxAgeMin: 600, timeLimitMode: 'off' };
+    const { built } = noShowScenario(quiet);
+    const decided = expectOk(tick(built, at(60)));
+
+    const reminded = decided.events.find((event) => event.type === 'TicketReminded');
+    // hold_min 7 分、リマインドはその 2 分前。
+    expect(reminded?.at).toBe(at(5));
+    const ended = decided.events.find((event) => event.type === 'TicketEnded');
+    // 7 分でホールドが切れて保留へ、そこから 10 分で保留の期限。
+    expect(ended?.at).toBe(at(17));
+  });
+
+  /**
+   * **呼び出しだけは「いま」起きる。**
+   *
+   * 席が空いたことは期限の時刻で刻めるが、次の人を呼べるのは `tick` が走った
+   * 時点である。止まっているあいだに遡って呼び出すと、**届いていない呼び出しの
+   * ホールドがすでに切れている**、という利用者に厳しい結果になる。
+   * 設計上の判断であって、取りこぼしではない。
+   */
+  it('席が空くのは期限の時刻、呼び出しは tick の時刻になる', () => {
+    const slow: Policy = { ...DEFAULT_POLICY, turnoverMin: 5, ticketMaxAgeMin: 600 };
+    let state = venue(slow, [table('tb-4', 4)]);
+    state = join(state, 'k1', 4, NOW, true);
+    state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' }, at(1));
+    state = join(state, 'k2', 4, at(2), true);
+    state = run(state, { type: 'CHECK_OUT', ticketId: 'k1', by: 'user' }, at(3));
+    expect(tableOf(state, 'tb-4').status).toBe('TURNOVER');
+
+    // 片付けの猶予は 8 分に明ける。1 時間後にまとめて処理する。
+    const decided = expectOk(tick(state, at(63)));
+    expect(decided.events.find((event) => event.type === 'TableFreed')?.at).toBe(at(8));
+    expect(decided.events.find((event) => event.type === 'TicketCalled')?.at).toBe(at(63));
+    expect(ticketOf(decided.state, 'k2').calledAt).toBe(at(63));
+  });
+
+  /**
+   * **止まっていたあいだの呼び出しは、遡らない。**
+   *
+   * 10 秒ごとに動いていれば、8 分に席が空いて呼ばれ、来なければ 15 分に
+   * ホールドが切れ、やがて保留の期限で終わる。1 時間止まっていた場合は、
+   * **再開した時点で呼び直す**。遡って呼び出すと、届いていない呼び出しの
+   * ホールドがすでに切れていることになり、利用者に不利になる（CLAUDE.md 2.5）。
+   *
+   * ここだけは刻み方で結果が変わる。**取りこぼしではなく、そう決めている。**
+   */
+  it('止まっていたあいだの呼び出しは遡らず、再開した時点で呼び直す', () => {
+    const slow: Policy = { ...DEFAULT_POLICY, turnoverMin: 5, ticketMaxAgeMin: 600 };
+    let state = venue(slow, [table('tb-4', 4)]);
+    state = join(state, 'k1', 4, NOW, true);
+    state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' }, at(1));
+    state = join(state, 'k2', 4, at(2), true);
+    state = run(state, { type: 'CHECK_OUT', ticketId: 'k1', by: 'user' }, at(3));
+
+    // 動き続けていた場合: 8 分に呼ばれ、来ないまま期限を重ねて終わる。
+    const stepped = everyTenSeconds(state, at(3), at(63));
+    expect(ticketOf(stepped, 'k2').state).toBe('EXPIRED');
+
+    // 1 時間止まっていた場合: いま呼び直す。7 分の猶予がそのまま与えられる。
+    const jumped = expectOk(tick(state, at(63))).state;
+    expect(ticketOf(jumped, 'k2').state).toBe('CALLED');
+    expect(ticketOf(jumped, 'k2').holdDeadline).toBe(at(70));
+  });
+});
+
+/**
+ * 評価の順序（Phase 1 プラン PR 12）。
+ *
+ * `tick` は毎回この順で進む。**順序を明示しておかないと、期限の処理より先に
+ * 割当が走って「空くはずの席」を飛ばす**、といった取りこぼしが起きる。
+ *
+ * | 段 | 何をするか | どこ |
+ * |---|---|---|
+ * | 1 | チケットの期限（ホールド・保留・上限・放置・運用終了） | `tick.ts` |
+ * | 2 | 施設の期限（受付の締切・運用終了） | `tick.ts` |
+ * | 3 | 席の期限（片付けの猶予・確認要の整理・運用から外れる席） | `settle.ts` |
+ * | 4 | 割当 | `settle.ts` |
+ * | 5 | 不変条件の検査 | `settle.ts` |
+ *
+ * 3 以降は `apply` と共有している。**席の期限を割当の前に明かす**のがここの
+ * 肝で、そうしないと空いているはずの席が次の人に渡らない（PR 7）。
+ */
+describe('評価の順序（期限 → 整理 → 割当）', () => {
+  /** 1 回の `tick` で、チケットの期限・席の期限・割当がすべて起きる筋書き。 */
+  function everythingAtOnce(): Decision<VenueState, DomainEvent> {
+    const slow: Policy = { ...DEFAULT_POLICY, turnoverMin: 5, ticketMaxAgeMin: 600 };
+    let state = venue(slow, [table('tb-a', 4), table('tb-b', 4)]);
+    state = join(state, 'k1', 4, NOW, true);
+    state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-a' }, at(1));
+    state = run(state, { type: 'CHECK_OUT', ticketId: 'k1', by: 'user' }, at(2));
+    expect(tableOf(state, 'tb-a').status).toBe('TURNOVER');
+
+    state = join(state, 'k2', 4, at(3), true);
+    expect(ticketOf(state, 'k2').tableId).toBe('tb-b');
+    state = join(state, 'k3', 4, at(4), true);
+    expect(ticketOf(state, 'k3').state).toBe('WAITING');
+
+    // 7 分で片付けの猶予が明け、10 分で k2 のホールドが切れる。
+    return expectOk(tick(state, at(12)));
+  }
+
+  it('チケットの期限 → 席の期限 → 割当 の順に起きる', () => {
+    expect(eventTypes(everythingAtOnce())).toEqual([
+      // 1. チケットの期限（k2 のホールド）
+      'TicketReminded',
+      'TicketPaused',
+      'TableFreed',
+      // 3. 席の期限（tb-a の片付けの猶予）
+      'TableFreed',
+      // 4. 割当（k3 を呼ぶ）
+      'TicketCalled',
+      'TableHeld',
+    ]);
+  });
+
+  it('席の期限はその期限の時刻で、割当は tick の時刻で刻まれる', () => {
+    const events = everythingAtOnce().events;
+    const freed = events.filter((event) => event.type === 'TableFreed');
+    expect(freed.map((event) => event.at)).toEqual([at(10), at(7)]);
+    expect(events.find((event) => event.type === 'TicketCalled')?.at).toBe(at(12));
+  });
+
+  it('割当は最後なので、その手のうちに空いた席も使われる', () => {
+    const decided = everythingAtOnce();
+    expect(ticketOf(decided.state, 'k3').state).toBe('CALLED');
+    expect(ticketOf(decided.state, 'k3').tableId).toBe('tb-a');
   });
 });

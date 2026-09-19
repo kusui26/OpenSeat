@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matching, transit, type Transition } from './transit.js';
+import { matching, taken, transit, type Transition } from './transit.js';
 
 /** 汎用の挙動だけを見るための、小さな作り物の状態機械。 */
 type Light = 'RED' | 'GREEN' | 'BROKEN';
@@ -28,6 +28,40 @@ describe('matching', () => {
 
   it('状態が違えば拾わない', () => {
     expect(matching(TABLE, 'GREEN', 'FIX')).toEqual([]);
+  });
+});
+
+describe('taken（いま採られる行）', () => {
+  it('ガードが通った行そのものを返す', () => {
+    expect(taken(TABLE, 'RED', 'TICK', ALL_PASS)?.note).toBe('通電していれば青に変わる');
+  });
+
+  it('無条件の行は、ガードの評価がすべて偽でも返る', () => {
+    expect(taken(TABLE, 'GREEN', 'TICK', ALL_FAIL)?.to).toBe('RED');
+  });
+
+  it('どのガードも通らなければ null', () => {
+    expect(taken(TABLE, 'RED', 'TICK', ALL_FAIL)).toBeNull();
+  });
+
+  it('宣言が無ければ null', () => {
+    expect(taken(TABLE, 'BROKEN', 'TICK', ALL_PASS)).toBeNull();
+  });
+
+  /**
+   * **`transit` と答えが割れない。** 選び方の規則を 2 か所に書くと、
+   * 網羅性の検査と実際の遷移で違う行を指しうる（PR 12）。
+   */
+  it('transit が返す行き先と、必ず一致する', () => {
+    for (const evaluate of [ALL_PASS, ALL_FAIL]) {
+      for (const from of ['RED', 'GREEN', 'BROKEN'] as const) {
+        for (const on of ['TICK', 'SMASH', 'FIX'] as const) {
+          const outcome = transit(TABLE, from, on, evaluate);
+          const row = taken(TABLE, from, on, evaluate);
+          expect(row?.to ?? null).toBe(outcome.kind === 'moved' ? outcome.to : null);
+        }
+      }
+    }
   });
 });
 

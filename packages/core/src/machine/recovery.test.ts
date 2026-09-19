@@ -245,9 +245,43 @@ describe('「まだご利用中ですか」（7.11 の 2 層目）', () => {
     expect(decided.events[0]).toMatchObject({ type: 'StillHereAsked', answerBy: at(51 + 5) });
   });
 
-  it('1 回だけ出る', () => {
+  it('答えが返るまでは、繰り返さない', () => {
     const asked = advance(seated(), at(52));
     expect(expectOk(tick(asked, at(53))).events).toEqual([]);
+    expect(expectOk(tick(asked, at(55))).events).toEqual([]);
+  });
+
+  /**
+   * **答えたら、そこから測り直してもう一度問いかける。**
+   *
+   * 7.11 は「1 回」と書いていたが、それだと一度答えた人の席は二度と時間で
+   * 回収されない。運用が終わったあとや、待つ人がいなくて上限が効かない施設では、
+   * その席が永久に塞がる（7.11 の「最悪でも席が永久に塞がらない」と食い違う）。
+   */
+  it('答えたら、そこから測り直してもう一度問いかける', () => {
+    const asked = advance(seated(), at(52));
+    const answered = run(asked, { type: 'STILL_HERE', ticketId: 'k1' }, at(53));
+
+    // p90 の既定は 50 分。答えた 53 分から測り直す。
+    expect(expectOk(tick(answered, at(100))).events).toEqual([]);
+    expect(eventTypes(expectOk(tick(answered, at(104))))).toEqual(['StillHereAsked']);
+  });
+
+  it('2 回目も答えなければ、席は「確認要」になる', () => {
+    const asked = advance(seated(), at(52));
+    const answered = run(asked, { type: 'STILL_HERE', ticketId: 'k1' }, at(53));
+    const again = advance(answered, at(104));
+    expect(tableOf(advance(again, at(110)), 'tb-4').status).toBe('NEEDS_CHECK');
+  });
+
+  it('答え続けているかぎり、席はその人のまま', () => {
+    let state = advance(seated(), at(52));
+    for (const minute of [53, 104, 155]) {
+      state = run(state, { type: 'STILL_HERE', ticketId: 'k1' }, at(minute));
+      state = advance(state, at(minute + 1));
+    }
+    expect(tableOf(state, 'tb-4').status).toBe('OCCUPIED');
+    expect(ticketOf(state, 'k1').state).toBe('SEATED');
   });
 
   it('答えが無いまま 5 分たつと、席が「確認要」になる', () => {
