@@ -7,12 +7,15 @@ import { minutes, type Timestamp } from '../time.js';
 import {
   evaluateTableGuard,
   evaluateTicketGuard,
+  tableGuardIsImplemented,
   ticketGuardIsImplemented,
   unimplementedTableGuards,
   unimplementedTicketGuards,
   type TableGuardContext,
   type TicketGuardContext,
 } from './guards.js';
+import { guardsUsedIn } from './graph.js';
+import { TABLE_GUARDS, TABLE_TRANSITIONS } from './table-machine.js';
 import { TICKET_GUARDS, TICKET_TRANSITIONS, type TicketGuard } from './ticket-machine.js';
 import { matching } from './transit.js';
 
@@ -42,24 +45,49 @@ function holds(guard: TicketGuard, overrides: Partial<TicketGuardContext> = {}):
   return evaluateTicketGuard(context(overrides), guard);
 }
 
-describe('実装の進み具合', () => {
+describe('宣言・参照・実装が一致すること（PR 12 の「ガードの一致」）', () => {
   /**
-   * 残っているガードの数を明示して、増えないようにする。
-   * PR 12 でここが空になる（`ticket-machine.ts` の冒頭の約束）。
+   * **ガードには 3 つの集合がある。**
+   *
+   * | 集合 | どこにあるか |
+   * |---|---|
+   * | 宣言 | `TICKET_GUARDS` / `TABLE_GUARDS` |
+   * | 参照 | 遷移表の行が `guard` に書いた名前 |
+   * | 実装 | `guards.ts` の判定 |
+   *
+   * **3 つがずれると、遷移が黙って通らなくなる。** 実装を書き忘れたガードは
+   * 成立しないものとして扱われるので（`GUARD_NOT_IMPLEMENTED`）、その遷移は
+   * 表にあるのに一生起きない。ここで 3 つが一致していることを固定する。
    */
+  it('チケットのガードは、宣言・参照・実装が完全に一致する', () => {
+    const declared = [...TICKET_GUARDS].sort();
+    const used = [...guardsUsedIn(TICKET_TRANSITIONS)].sort();
+    const implemented = declared.filter((guard) => ticketGuardIsImplemented(guard));
+    expect(used).toEqual(declared);
+    expect(implemented).toEqual(declared);
+  });
+
+  it('席のガードも、宣言・参照・実装が完全に一致する', () => {
+    const declared = [...TABLE_GUARDS].sort();
+    const used = [...guardsUsedIn(TABLE_TRANSITIONS)].sort();
+    const implemented = declared.filter((guard) => tableGuardIsImplemented(guard));
+    expect(used).toEqual(declared);
+    expect(implemented).toEqual(declared);
+  });
+
   /**
    * **宣言されたガードがすべて実装された。**
    *
    * `ticket-machine.ts` の冒頭が「PR 12 で閉じる」と約束していたもので、
    * 着席時間の上限（`hardLimitMode`）と確認要の自動解放（`autoFreeEnabled`）が
-   * 入ったこの版で 0 になった。**ここが空でなくなったら、遷移が黙って
+   * 入った PR 10 で 0 になった。**ここが空でなくなったら、遷移が黙って
    * 通らなくなっている**ので、ガードを足したら必ず実装すること。
    */
-  it('チケットのガードは 10 個すべてが実装済み', () => {
+  it('実装されていないチケットのガードは 1 つも無い', () => {
     expect(unimplementedTicketGuards()).toEqual([]);
   });
 
-  it('席のガードは 3 個すべてが実装済み', () => {
+  it('実装されていない席のガードは 1 つも無い', () => {
     expect(unimplementedTableGuards()).toEqual([]);
   });
 

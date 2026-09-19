@@ -27,6 +27,7 @@
  * | `GUARD_NOT_IMPLEMENTED` | 遷移はあるが、条件の判定がまだ書かれていない |
  * | `REASON_REQUIRED` | スタッフの取り消しに理由が無い（7.9） |
  * | `NO_CODE_AVAILABLE` | 生きているチケットが表示コードを使い切った |
+ * | `CLOCK_WENT_BACKWARD` | 渡された時刻が状態の時刻より前（起きてはならない。9.4） |
  * | `INVARIANT_VIOLATED` | 出口の検査で不変条件が破れた（起きてはならない） |
  */
 export const REJECTION_CODES = [
@@ -43,6 +44,7 @@ export const REJECTION_CODES = [
   'GUARD_NOT_IMPLEMENTED',
   'REASON_REQUIRED',
   'NO_CODE_AVAILABLE',
+  'CLOCK_WENT_BACKWARD',
   'INVARIANT_VIOLATED',
 ] as const;
 
@@ -62,9 +64,13 @@ export function rejection(code: RejectionCode, describe: string): Rejection {
 /**
  * 拒否のうち、**起きてはならない**もの。
  *
- * `INVARIANT_VIOLATED` は入力の誤りではなく実装の誤りである。境界側はこれを
- * 利用者向けの文言に変えるのではなく、記録して調査する対象として扱うこと。
+ * どちらも入力の誤りではなく実装の誤りである。`INVARIANT_VIOLATED` は出口の
+ * 検査が破れたこと、`CLOCK_WENT_BACKWARD` は渡された時刻が戻ったこと（9.4）。
+ * 境界側はこれを利用者向けの文言に変えるのではなく、記録して調査する対象と
+ * して扱うこと。
  */
 export function isDefect(value: Rejection): boolean {
-  return value.code === 'INVARIANT_VIOLATED';
+  return DEFECT_CODES.includes(value.code);
 }
+
+const DEFECT_CODES: readonly RejectionCode[] = ['INVARIANT_VIOLATED', 'CLOCK_WENT_BACKWARD'];

@@ -60,11 +60,29 @@ export function matching<State extends string, Event extends string, Guard exten
 }
 
 /**
- * 遷移を試みる。
+ * いま採られる行。どの行のガードも通らなければ `null`。
  *
- * 宣言の順に評価し、最初にガードを通った行を採る。無条件の行は常に通る。
+ * 宣言の順に評価し、**最初にガードを通った行**を採る。無条件の行は常に通る。
  * 同じ組み合わせに複数の行があるときは、ガードが互いに排他になるように
  * 宣言すること（`ambiguous()` が検査する）。
+ *
+ * **選び方の規則はここ 1 か所にしかない。** `transit()` もこれを使う。
+ * 「どの行が採られるか」を別々に書くと、検査と実行で答えが割れる。
+ */
+export function taken<State extends string, Event extends string, Guard extends string>(
+  table: readonly Transition<State, Event, Guard>[],
+  from: State,
+  on: Event,
+  evaluate: GuardEvaluator<Guard>,
+): Transition<State, Event, Guard> | null {
+  return matching(table, from, on).find((row) => row.guard === null || evaluate(row.guard)) ?? null;
+}
+
+/**
+ * 遷移を試みる。
+ *
+ * 行き先が決まったか、宣言が無いか、宣言はあるがどのガードも通らなかったかを
+ * 区別して返す。どの行が採られるかは `taken()` が決める。
  */
 export function transit<State extends string, Event extends string, Guard extends string>(
   table: readonly Transition<State, Event, Guard>[],
@@ -75,12 +93,9 @@ export function transit<State extends string, Event extends string, Guard extend
   const rows = matching(table, from, on);
   if (rows.length === 0) return { kind: 'undeclared' };
 
-  for (const row of rows) {
-    if (row.guard === null || evaluate(row.guard)) {
-      return { kind: 'moved', to: row.to, guard: row.guard };
-    }
-  }
-  return { kind: 'blocked', tried: rows.map((row) => row.guard).filter(isGuard) };
+  const row = taken(table, from, on, evaluate);
+  if (row !== null) return { kind: 'moved', to: row.to, guard: row.guard };
+  return { kind: 'blocked', tried: rows.map((candidate) => candidate.guard).filter(isGuard) };
 }
 
 function isGuard<Guard extends string>(guard: Guard | null): guard is Guard {

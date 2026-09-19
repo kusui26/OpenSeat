@@ -196,11 +196,18 @@ function presenceConfirmedAfter(ticket: Ticket, due: Timestamp): boolean {
  * **上限モードが `off` でも動く。** これは上限の仕掛けではなく、退席ボタンの
  * 押し忘れを拾うためのものだからである（7.10 の末尾）。目安は施設の滞在時間
  * 分布の 90 パーセンタイル。
+ *
+ * **答えたら、そこから測り直してもう一度問いかける。** 7.11 は「1 回」と
+ * 書いていたが、それだと **一度答えた人の席は二度と時間で回収されない**。
+ * 運用が終わったあとや、待つ人がいなくて上限が効かない施設では、その席が
+ * 永久に塞がる（7.11 の「最悪でも席が永久に塞がらない」と食い違う）。
+ * 答えた人にもう一度聞くのは、1 タップで済むうえ、席を守ることにもなる。
  */
 export function stillHereAskAt(ticket: Ticket, policy: Policy): Timestamp | null {
   if (ticket.state !== 'SEATED' || ticket.seatedAt === null) return null;
-  if (ticket.stillHereAskedAt !== null) return null;
-  return ticket.seatedAt + minutes(policy.stillHerePromptMin);
+  if (awaitingAnswer(ticket)) return null;
+  // 答えがあれば、そこから測り直す。長く座る人には繰り返し問いかける。
+  return (ticket.stillHereAnsweredAt ?? ticket.seatedAt) + minutes(policy.stillHerePromptMin);
 }
 
 /**
@@ -210,9 +217,20 @@ export function stillHereAskAt(ticket: Ticket, policy: Policy): Timestamp | null
  * 同じ処理を繰り返さない。
  */
 export function stillHereTimeoutAt(ticket: Ticket, state: VenueState): Timestamp | null {
-  if (ticket.state !== 'SEATED' || ticket.stillHereAskedAt === null) return null;
-  if (ticket.stillHereAnsweredAt !== null || seatIsUncertain(state, ticket)) return null;
-  return ticket.stillHereAskedAt + minutes(state.policy.stillHereTimeoutMin);
+  if (!awaitingAnswer(ticket) || seatIsUncertain(state, ticket)) return null;
+  const askedAt: Timestamp = ticket.stillHereAskedAt ?? 0;
+  return askedAt + minutes(state.policy.stillHereTimeoutMin);
+}
+
+/**
+ * いま問いかけていて、まだ答えが返っていないか。
+ *
+ * **時刻で比べる。** 一度答えたあとにもう一度問いかけることがあるので、
+ * 「答えたかどうか」ではなく「**最後の問いかけより後に答えたか**」で見る。
+ */
+function awaitingAnswer(ticket: Ticket): boolean {
+  if (ticket.state !== 'SEATED' || ticket.stillHereAskedAt === null) return false;
+  return ticket.stillHereAnsweredAt === null || ticket.stillHereAnsweredAt < ticket.stillHereAskedAt;
 }
 
 // ---- 席の期限（全体プラン 7.6、7.11 の 5 層目） ----

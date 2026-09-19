@@ -269,6 +269,14 @@ describe('状態の比較', () => {
       expect(sameVenueState(base, { ...base, operating: true })).toBe(false);
     });
 
+    it('運用の終わる時刻が違えば偽', () => {
+      expect(sameVenueState(base, { ...base, closesAt: NOW })).toBe(false);
+    });
+
+    it('時計の刻みが違えば偽', () => {
+      expect(sameVenueState(base, { ...base, clockAt: NOW })).toBe(false);
+    });
+
     it('設定が別のオブジェクトなら偽（apply と tick は設定を作り直さない）', () => {
       const recreated = { ...base, policy: { ...DEFAULT_POLICY } };
       expect(sameVenueState(base, recreated)).toBe(false);

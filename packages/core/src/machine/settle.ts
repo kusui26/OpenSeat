@@ -7,6 +7,7 @@
  *    外れる席を外す
  * 2. **割当を実行する。** 空席と待ちが噛み合っていれば呼び出す
  * 3. **不変条件を検査する。** 破れていたら変更を破棄して拒否する
+ * 4. **時計を刻む。** ここまで進んだことを状態に残す（9.4、`clock.ts`）
  *
  * どちらもここを通らずに状態を返さない。だから「空席があるのに誰も呼ばれない」
  * が起きない。
@@ -28,6 +29,7 @@ import { checkInvariants, formatViolations } from '../invariant.js';
 import { err, ok, type Result } from '../result.js';
 import { reached, type Timestamp } from '../time.js';
 import { runAllocation } from './allocate.js';
+import { withClock } from './clock.js';
 import { autoFreeAt, turnoverEndsAt, unknownAgedAt } from './deadlines.js';
 import type { DomainEvent } from './events.js';
 import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
@@ -309,7 +311,8 @@ export function settle(drafted: Draft, now: Timestamp): Outcome {
     return err(rejection('INVARIANT_VIOLATED', formatViolations(violations)));
   }
   return ok({
-    state: allocated.value.state,
+    // ここまで進んだことを刻む。次に戻った時刻が来たら入口で落とせる（9.4）。
+    state: withClock(allocated.value.state, now),
     events: [...drafted.events, ...tables.value.events, ...allocated.value.events],
   });
 }

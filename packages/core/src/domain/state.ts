@@ -55,6 +55,15 @@ export interface VenueState {
    */
   readonly closesAt: Timestamp | null;
 
+  /**
+   * この状態が知っている最後の時刻（全体プラン 9.4）。まだ一度も進めていなければ `null`。
+   *
+   * **時計が戻っていないことを確かめるためだけに持つ。** 期限の判定はすべて
+   * 「状態に書いてある絶対時刻」と `now` の比較なので、時計が戻ると過ぎた期限が
+   * また「これから」に戻ってしまう（`machine/clock.ts`）。
+   */
+  readonly clockAt: Timestamp | null;
+
   /** 表示コードの採番カウンタ。0 から始まる。 */
   readonly nextCodeSeq: number;
 }
@@ -75,6 +84,7 @@ export function createVenueState(params: CreateVenueStateParams): VenueState {
     operating: false,
     joinOpen: false,
     closesAt: null,
+    clockAt: null,
     nextCodeSeq: 0,
   };
 }
@@ -304,16 +314,32 @@ export function sameTicket(a: Ticket, b: Ticket): boolean {
  * 値で比べるより厳しい判定になるが、厳しい側に外れるぶんには見落としが出ない。
  */
 export function sameVenueState(a: VenueState, b: VenueState): boolean {
+  return sameVenueFields(a, b) && sameTables(a, b) && sameTickets(a, b);
+}
+
+/** 施設そのものの欄。席とチケットは別に比べる。 */
+function sameVenueFields(a: VenueState, b: VenueState): boolean {
   return (
     a.venueId === b.venueId &&
     a.operating === b.operating &&
     a.joinOpen === b.joinOpen &&
     a.closesAt === b.closesAt &&
+    a.clockAt === b.clockAt &&
     a.nextCodeSeq === b.nextCodeSeq &&
-    a.policy === b.policy &&
+    a.policy === b.policy
+  );
+}
+
+function sameTables(a: VenueState, b: VenueState): boolean {
+  return (
     a.tables.length === b.tables.length &&
+    a.tables.every((table, index) => matchesAt(b.tables, index, table, sameTable))
+  );
+}
+
+function sameTickets(a: VenueState, b: VenueState): boolean {
+  return (
     a.tickets.length === b.tickets.length &&
-    a.tables.every((table, index) => matchesAt(b.tables, index, table, sameTable)) &&
     a.tickets.every((ticket, index) => matchesAt(b.tickets, index, ticket, sameTicket))
   );
 }

@@ -118,7 +118,7 @@ export {
 // ---- 状態機械（Phase 1 PR 2）----
 
 export type { Transition, TransitOutcome, GuardEvaluator } from './machine/transit.js';
-export { matching, transit } from './machine/transit.js';
+export { matching, taken, transit } from './machine/transit.js';
 
 export {
   outgoing,
@@ -311,7 +311,12 @@ export {
 // `apply` と `tick` の 2 つだけにしておく（CLAUDE.md 3 章）。
 export { apply } from './machine/apply.js';
 
-export { ticketTransition, tableTransition } from './machine/transition.js';
+export {
+  ticketTransition,
+  tableTransition,
+  ticketTransitionRow,
+  tableTransitionRow,
+} from './machine/transition.js';
 
 export type { StartedPause } from './machine/deadlines.js';
 export {

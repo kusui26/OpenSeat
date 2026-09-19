@@ -6,8 +6,26 @@ import { END_REASONS, isTerminal, type EndReason, type Ticket } from '../domain/
 import { createVenueState, sameVenueState, type VenueState } from '../domain/state.js';
 import { checkInvariants } from '../invariant.js';
 import { isDefect } from './rejection.js';
-import { minutes, seconds, type Timestamp } from '../time.js';
+import { hasPassed, minutes, reached, seconds, type Timestamp } from '../time.js';
 import { apply } from './apply.js';
+import {
+  abandonedAt,
+  autoFreeAt,
+  holdExpiresAt,
+  holdReminderAt,
+  joinCutoffAt,
+  maxAgeAt,
+  overstayAt,
+  pauseExpiresAt,
+  stillHereAskAt,
+  stillHereTimeoutAt,
+  timeLimitNoticeAt,
+  turnoverEndsAt,
+  unknownAgedAt,
+  venueCloseAt,
+  venueClosesAt,
+} from './deadlines.js';
+import { evaluateTicketGuard } from './guards.js';
 import type { Actor, Command } from './command.js';
 import type { DomainEvent } from './events.js';
 import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
@@ -265,6 +283,58 @@ function endOf(moves: readonly Move[], stepMin: number): Timestamp {
   return NOW + minutes(stepMin) * moves.length;
 }
 
+/**
+ * その時刻で「もう来ている」のに処理されていない期限を数え上げる。
+ *
+ * チケットの期限は利用者に与える猶予なので `hasPassed`（ちょうどは過ぎて
+ * いない）、席の期限は設備の都合なので `reached`（ちょうどで来ている）で測る
+ * （`time.ts`）。判定の向きを実装と揃えてある。
+ */
+function overdueIn(state: VenueState, now: Timestamp): readonly string[] {
+  const overdue: string[] = [];
+
+  for (const ticket of state.tickets) {
+    const deadlines: readonly (readonly [string, Timestamp | null])[] = [
+      ['hold_reminder', holdReminderAt(ticket, state.policy)],
+      ['hold_expire', holdExpiresAt(ticket)],
+      ['pause_expire', pauseExpiresAt(ticket)],
+      ['max_age', maxAgeAt(ticket, state.policy)],
+      ['abandon', abandonedAt(ticket, state.policy)],
+      ['time_limit_notice', timeLimitNoticeAt(ticket, state)],
+      ['still_here_ask', stillHereAskAt(ticket, state.policy)],
+      ['still_here_timeout', stillHereTimeoutAt(ticket, state)],
+      ['overstay', overstayAt(ticket, state)],
+      ['venue_close', venueCloseAt(ticket, state)],
+    ];
+    for (const [name, due] of deadlines) {
+      if (due !== null && hasPassed(due, now)) overdue.push(`${ticket.id}:${name}`);
+    }
+  }
+
+  for (const table of state.tables) {
+    const deadlines: readonly (readonly [string, Timestamp | null])[] = [
+      ['turnover', turnoverEndsAt(table, state.policy)],
+      ['unknown_aged', unknownAgedAt(table, state.policy)],
+      ['auto_free', autoFreeAt(table, state.policy)],
+    ];
+    for (const [name, due] of deadlines) {
+      if (due !== null && reached(due, now)) overdue.push(`${table.id}:${name}`);
+    }
+    // 運用から外れるべき空席が残っていないか（期限ではなく、いま真かどうか）。
+    if (table.status === 'FREE' && (table.disableAfterCurrent || !state.operating)) {
+      overdue.push(`${table.id}:leaves_service`);
+    }
+  }
+
+  // 施設そのものの期限（7.14）。
+  const cutoff: Timestamp | null = joinCutoffAt(state);
+  if (cutoff !== null && hasPassed(cutoff, now)) overdue.push('venue:join_cutoff');
+  const closes: Timestamp | null = venueClosesAt(state);
+  if (closes !== null && hasPassed(closes, now)) overdue.push('venue:close');
+
+  return overdue;
+}
+
 function declaredMove(from: string, to: string): boolean {
   return TICKET_TRANSITIONS.some((row) => row.from === from && row.to === to);
 }
@@ -307,6 +377,102 @@ describe('tick が決して破らないこと', () => {
         const last: Timestamp = NOW + minutes(stepMin) * moves.length;
         const again = tick(settled, last);
         return again.ok && sameVenueState(settled, again.value.state) && again.value.events.length === 0;
+      }),
+      RUNS,
+    );
+  });
+
+  /**
+   * 9.12 の 5 を、**呼ぶ回数を増やしても**確かめる。
+   *
+   * 1 回目と 2 回目が同じなら 100 回目も同じ、と言いたくなるが、それは
+   * 「2 回目が 1 回目と同じ」から出る帰結であって、独立に確かめる価値がある。
+   * 数え上げで進む実装（「経過した回数」で判定するもの）は、ここで必ず落ちる。
+   */
+  it('同じ時刻で 100 回呼んでも状態が変わらない（冪等・9.12 の 5）', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const settled = play(state, moves, stepMin).state;
+        const last: Timestamp = endOf(moves, stepMin);
+        let current: VenueState = settled;
+        for (let round = 0; round < 100; round += 1) {
+          const again = tick(current, last);
+          if (!again.ok || again.value.events.length > 0) return false;
+          current = again.value.state;
+        }
+        return sameVenueState(settled, current);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  /**
+   * **大きく飛んでも、一度で追いつく**（Phase 1 プラン PR 12 の「時間の飛び」）。
+   *
+   * サーバの再起動やスケジューラの遅れで、`tick` が 10 秒ではなく 1 時間ぶん
+   * 飛ぶことがある。そのとき **来ている期限が 1 つも残らない**ことを確かめる。
+   * 残ると、次の `tick` まで誰かが待たされ、飛んだ幅だけ遅れが伸びていく。
+   *
+   * これが成り立つのは、期限を「経過した回数」ではなく **絶対時刻の比較**で
+   * 判定しているからである（`deadlines.ts`）。
+   */
+  it('1 時間飛ばしても、来ている期限が 1 つも残らない', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const built = play(state, moves, stepMin).state;
+        const to: Timestamp = endOf(moves, stepMin) + minutes(60);
+        expect(overdueIn(tickedState(built, to), to)).toEqual([]);
+      }),
+      RUNS,
+    );
+  });
+
+  it('10 秒ごとに呼んでいても、来ている期限は残らない', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const trace = play(state, moves, stepMin);
+        const last: Timestamp = endOf(moves, stepMin);
+        expect(overdueIn(trace.state, last)).toEqual([]);
+      }),
+      RUNS,
+    );
+  });
+
+  /**
+   * **空席に前倒しで座れる人は、出口には残らない。**
+   *
+   * 割当が出口で必ず走るので、「収まる空席があるのに待っている人が残る」ことが
+   * 無い（不変条件 `no_starvation`）。前倒しの着席（7.8 の 4 行目）は
+   * まさにその状態でしか成り立たないので、**空席に対しては決して通らない。**
+   * 7.8 の 4 行目が想定する場面は、実際には通常の呼び出しで満たされている。
+   *
+   * 前倒しが実際に要るのは「確認要」の席のほうで（7.11 の 3 層目）、そちらは
+   * 別の行として通っている（`reachability.test.ts`）。
+   */
+  it('空席に前倒しで座れる人は残らない（7.8 の 4 行目は空席では起こらない）', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const built = play(state, moves, stepMin).state;
+        const free = built.tables.filter((table) => table.enabled && table.status === 'FREE');
+        const waiting = built.tickets.filter((ticket) => ticket.state === 'WAITING');
+        return free.every((table) =>
+          waiting.every(
+            (ticket) =>
+              !evaluateTicketGuard({ state: built, ticket, table, now: NOW }, 'earlyCheckInAllowed'),
+          ),
+        );
+      }),
+      RUNS,
+    );
+  });
+
+  it('時刻を戻す tick は拒否される（9.4）', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const built = play(state, moves, stepMin).state;
+        const last: Timestamp = endOf(moves, stepMin);
+        const back = tick(built, last - 1);
+        return !back.ok && back.error.code === 'CLOCK_WENT_BACKWARD';
       }),
       RUNS,
     );
