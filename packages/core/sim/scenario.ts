@@ -74,6 +74,16 @@ export interface Scenario {
   readonly walkInShare: number;
   /** 受付を開けておく時間。ここを過ぎた到着は受け付けない。 */
   readonly joinOpenFor: DurationMs;
+  /**
+   * 運用が終わるまでの時間（全体プラン 7.14）。`null` なら終わらない。
+   *
+   * **既定は `null` にしてある。** 8.1 のシナリオは「ピークの 3 時間半」を
+   * 切り出したもので、その先に閉店があるかどうかは 8.1 に書かれていない。
+   * 運用終了を入れると、終了時刻に残っていた人が施設都合で取り消され、
+   * 待ち時間や回転率の見え方が変わる。**測りたいものが変わってしまうので、
+   * 運用時間を見たいときだけ `withClosing()` で足す。**
+   */
+  readonly closesAfter: DurationMs | null;
   readonly policy: Policy;
 }
 
@@ -229,6 +239,7 @@ function scenario(params: ScenarioParams): Scenario {
     unregisteredPerTableHour: UNREGISTERED_PER_TABLE_HOUR,
     walkInShare: WALK_IN_SHARE,
     joinOpenFor: arrivalWindow(params.arrivals),
+    closesAfter: null,
     policy: DEFAULT_POLICY,
   };
 }
@@ -296,6 +307,16 @@ export type ScenarioName = keyof typeof SCENARIOS;
 /** 設定を差し替えたシナリオを作る。方針の比較（8.2）で使う。 */
 export function withPolicy(base: Scenario, policy: Policy): Scenario {
   return { ...base, policy };
+}
+
+/**
+ * 運用時間を持たせたシナリオを作る（全体プラン 7.14）。
+ *
+ * `after` は開始から運用終了までの時間。受付はその `join_cutoff_before_close_min`
+ * 前に止まり、終了時刻に残っていた待ちは施設都合で取り消される。
+ */
+export function withClosing(base: Scenario, after: DurationMs): Scenario {
+  return { ...base, closesAfter: after };
 }
 
 /** 退席の申告率を差し替えたシナリオを作る。 */

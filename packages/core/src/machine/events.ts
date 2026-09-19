@@ -296,13 +296,57 @@ export interface TableFreed {
 /**
  * 席が管理対象から外れた。
  *
- * 対象外にする操作が保留されていた席が、利用の終了とともに外れたときに出る
- * （7.6 のエッジケース）。運用時間帯による切り替えは PR 11 で扱う。
+ * 対象外にする操作が保留されていた席が利用の終了とともに外れたとき（7.6）、
+ * 運用が終わったとき、全席解放のとき（7.14、7.9）に出る。
  */
 export interface TableDisabled {
   readonly type: 'TableDisabled';
   readonly at: Timestamp;
   readonly tableId: TableId;
+}
+
+// ---- 施設の開閉（全体プラン 7.14、7.9） ----
+
+/** なぜ運用が終わったか。 */
+export const CLOSE_REASONS = ['schedule', 'manual', 'release_all'] as const;
+
+export type CloseReason = (typeof CLOSE_REASONS)[number];
+
+/**
+ * 運用が始まった。
+ *
+ * `closesAt` はこの営業回が終わる時刻（`null` なら手動で閉じるまで続く）。
+ * 画面はこれを見て「本日の運用は 14:30 まで」を出せる。
+ */
+export interface VenueOpened {
+  readonly type: 'VenueOpened';
+  readonly at: Timestamp;
+  readonly closesAt: Timestamp | null;
+}
+
+/**
+ * 新規の受付を止めた（全体プラン 7.14 の `join_cutoff_before_close_min`）。
+ *
+ * 運用は続いている。**すでに並んでいる人はそのまま案内される。**
+ */
+export interface JoinClosed {
+  readonly type: 'JoinClosed';
+  readonly at: Timestamp;
+  /** この時刻に運用が終わる。 */
+  readonly closesAt: Timestamp;
+}
+
+/**
+ * 運用が終わった。
+ *
+ * **誰が取り消されたかはここに載せない。** それぞれ `TicketEnded`
+ * （`endReason` は `venue_closed`）として出ており、二重に持つと片方だけが
+ * 正しい状態を作ってしまう。数えたい側はそちらを読む。
+ */
+export interface VenueClosed {
+  readonly type: 'VenueClosed';
+  readonly at: Timestamp;
+  readonly reason: CloseReason;
 }
 
 export type DomainEvent =
@@ -326,7 +370,10 @@ export type DomainEvent =
   | PartySizeChanged
   | TicketEnded
   | TableFreed
-  | TableDisabled;
+  | TableDisabled
+  | VenueOpened
+  | JoinClosed
+  | VenueClosed;
 
 export type DomainEventType = DomainEvent['type'];
 
@@ -357,4 +404,7 @@ export const DOMAIN_EVENT_TYPES = [
   'TicketEnded',
   'TableFreed',
   'TableDisabled',
+  'VenueOpened',
+  'JoinClosed',
+  'VenueClosed',
 ] as const satisfies readonly DomainEventType[];

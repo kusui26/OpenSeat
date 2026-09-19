@@ -19,7 +19,7 @@ import type { Table } from '../domain/table.js';
 import type { VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
 import { minutes, type DurationMs, type Timestamp } from '../time.js';
-import { MAX_AGE_APPLIES_TO } from './ticket-machine.js';
+import { MAX_AGE_APPLIES_TO, VENUE_CLOSE_APPLIES_TO } from './ticket-machine.js';
 
 // ---- ホールド（全体プラン 7.7 の 2〜4） ----
 
@@ -261,6 +261,44 @@ export function turnoverEndsAt(table: Table, policy: Policy): Timestamp | null {
 export function maxAgeAt(ticket: Ticket, policy: Policy): Timestamp | null {
   if (!MAX_AGE_APPLIES_TO.includes(ticket.state)) return null;
   return ticket.createdAt + minutes(policy.ticketMaxAgeMin);
+}
+
+// ---- 運用時間帯（全体プラン 7.14） ----
+
+/**
+ * 待っている人が施設都合で取り消される時刻。
+ *
+ * **待っている人（`WAITING` / `PAUSED`）だけが対象である。** 席を確保した人と
+ * 着席中の人は運用終了では終わらない。7.14 が「`SEATED` は `DISABLED` になっても
+ * 座り続けて問題ない」と書いており、7.4 が「利用中の席は現在の利用が終わって
+ * から外す」としているためで、確保した席に向かっている人を締め出す理由も無い。
+ *
+ * **チケットの期限として並べてある**のが肝心なところ。運用終了だけを先に処理
+ * すると、それより早いホールドの期限が後回しになり、`tick` の刻み方で結果が
+ * 変わってしまう（`tick.ts` の「期限は早いものから」）。
+ *
+ * 運用が終わったあとも `closesAt` は消えないので、**終了後に待ちへ戻った人**
+ * （ノーショーの繰り上げなど）も次の `tick` で拾える。
+ */
+export function venueCloseAt(ticket: Ticket, state: VenueState): Timestamp | null {
+  if (!VENUE_CLOSE_APPLIES_TO.includes(ticket.state)) return null;
+  return state.closesAt;
+}
+
+/**
+ * 新規の受付を止める時刻（`join_cutoff_before_close_min`）。
+ *
+ * すでに並んでいる人は最後まで案内されるので、**終了の手前で入口だけを閉じる**。
+ * 受付をすでに閉じているなら `null`（一度きり）。
+ */
+export function joinCutoffAt(state: VenueState): Timestamp | null {
+  if (!state.joinOpen || state.closesAt === null) return null;
+  return state.closesAt - minutes(state.policy.joinCutoffBeforeCloseMin);
+}
+
+/** 施設そのものが閉まる時刻。すでに運用していないなら `null`（一度きり）。 */
+export function venueClosesAt(state: VenueState): Timestamp | null {
+  return state.operating ? state.closesAt : null;
 }
 
 // ---- 放置（全体プラン 7.9 の「暗黙のキャンセル」） ----

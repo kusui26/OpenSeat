@@ -92,14 +92,15 @@ const COVERED_BY_TESTS: readonly string[] = [
   'held_table_has_deadline',
   'state_timestamps_are_set',
   'end_reason_matches_state',
+  'join_requires_operating',
   'no_starvation',
   'priority_preserved_across_pause',
   'tick_idempotent',
 ];
 
 describe('宣言の全体', () => {
-  it('14 個の不変条件が宣言されている', () => {
-    expect(ALL_INVARIANT_NAMES).toHaveLength(14);
+  it('15 個の不変条件が宣言されている', () => {
+    expect(ALL_INVARIANT_NAMES).toHaveLength(15);
   });
 
   it('宣言されたすべての不変条件に、成立例と違反例のテストがある', () => {
@@ -111,7 +112,7 @@ describe('宣言の全体', () => {
   });
 
   it('3 つの群に分かれている', () => {
-    expect(STATE_INVARIANTS).toHaveLength(11);
+    expect(STATE_INVARIANTS).toHaveLength(12);
     expect(POST_ALLOCATION_INVARIANTS).toHaveLength(1);
     expect(TRANSITION_INVARIANTS).toHaveLength(2);
   });
@@ -344,6 +345,24 @@ describe('end_reason_matches_state', () => {
         : ticket,
     );
     expectHealthy(venue(base.tables, ok));
+  });
+});
+
+describe('join_requires_operating', () => {
+  const base = healthy();
+
+  it('運用していないのに受付だけ開いていたら落ちる', () => {
+    const broken: VenueState = { ...venue(base.tables, base.tickets), operating: false, joinOpen: true };
+    expectOnlyViolated(broken, 'join_requires_operating');
+  });
+
+  it('運用しながら受付を開いていれば成立する', () => {
+    expectHealthy({ ...venue(base.tables, base.tickets), operating: true, joinOpen: true });
+  });
+
+  /** 運用終了の手前。受付だけ閉じて、並んでいる人は最後まで案内する（7.14）。 */
+  it('運用しながら受付だけ閉じていても成立する', () => {
+    expectHealthy({ ...venue(base.tables, base.tickets), operating: true, joinOpen: false });
   });
 });
 

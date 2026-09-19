@@ -10,6 +10,7 @@ import {
   WEEKEND_OVERLOAD,
   WEEKEND_PEAK,
   withCheckoutReportRate,
+  withClosing,
   withPolicy,
   withUnregisteredRate,
   withWalkInShare,
@@ -426,6 +427,83 @@ describe('整合性の回復が効いていること（7.10、7.11）', () => {
  * いつか戻るが、そのあいだ席は空いたまま誰も座れない。見に行ける人がいるなら、
  * その人に確かめてもらったほうが早い。
  */
+/**
+ * 運用時間帯（全体プラン 7.14）。
+ *
+ * **シナリオが運用時間を持てるようになった**（PR 11 の完了条件）。持たせると、
+ * 終了時刻に残っていた待ちが施設都合で取り消され、席が自由席に戻る。
+ */
+describe('運用時間を持つシナリオ（7.14）', () => {
+  /** 1 時間ぶんの到着に、45 分で終わる運用時間をかぶせる。 */
+  const CLOSING: Scenario = withClosing(SHORT, minutes(45));
+
+  function endedBy(result: RunResult, reason: string): number {
+    return result.state.tickets.filter((ticket) => ticket.endReason === reason).length;
+  }
+
+  it('既定のシナリオは運用終了を持たない', () => {
+    expect(SHORT.closesAfter).toBeNull();
+    expect(countOf(run({ scenario: SHORT, seed: 5 }), 'VenueClosed')).toBe(0);
+  });
+
+  it('運用時間を持たせると、終了して席が自由席に戻る', () => {
+    const result = run({ scenario: CLOSING, seed: 5 });
+    expect(countOf(result, 'VenueClosed')).toBe(1);
+    expect(result.state.operating).toBe(false);
+    expect(result.state.tables.every((table) => table.status === 'DISABLED')).toBe(true);
+  });
+
+  it('終了の手前で受付が止まる', () => {
+    const result = run({ scenario: CLOSING, seed: 5 });
+    expect(countOf(result, 'JoinClosed')).toBe(1);
+    expect(result.state.joinOpen).toBe(false);
+  });
+
+  /** 締切（既定 15 分前）より後の受付は通らない。 */
+  it('締切より後に来た人は、受付に入れない', () => {
+    const result = run({ scenario: CLOSING, seed: 5 });
+    const joined = result.events.filter((event) => event.type === 'TicketJoined');
+    const cutoff: Timestamp = SIM_EPOCH + minutes(45 - DEFAULT_POLICY.joinCutoffBeforeCloseMin);
+    expect(joined.every((event) => event.at <= cutoff)).toBe(true);
+  });
+
+  /**
+   * **待ちが残る混み方でないと見えない。** 8.1 の到着率は席数に釣り合わせて
+   * あるので、`SHORT` では終了時刻に誰も待っていないことがある。過負荷の
+   * シナリオ（`weekend-overload`）で確かめる。
+   */
+  it('終了時に待っていた人は、施設都合で取り消される', () => {
+    const crowded: Scenario = withClosing(WEEKEND_OVERLOAD, minutes(60));
+    const result = run({ scenario: crowded, seed: 5 });
+    expect(endedBy(result, 'venue_closed')).toBeGreaterThan(0);
+    // 取り消されたのは待っていた人だけ。着席していた人は使い終わっている。
+    expect(endedBy(result, 'checked_out')).toBeGreaterThan(0);
+  });
+
+  it('運用時間が無ければ、施設都合の取り消しは 1 件も起きない', () => {
+    expect(endedBy(run({ scenario: SHORT, seed: 5 }), 'venue_closed')).toBe(0);
+  });
+
+  /** 7.14「`SEATED` は `DISABLED` になっても座り続けて問題ない」。 */
+  it('終了しても、着席していた人は最後まで使い終わる', () => {
+    const result = run({ scenario: CLOSING, seed: 5 });
+    expect(countOf(result, 'TicketSeated')).toBeGreaterThan(0);
+    expect(endedBy(result, 'checked_out')).toBeGreaterThan(0);
+  });
+
+  it('十分に時間が経てば、生きたチケットは 1 枚も残らない', () => {
+    const result = run({ scenario: CLOSING, seed: 5 });
+    expect(result.state.tickets.every((ticket) => ticket.endedAt !== null)).toBe(true);
+  });
+
+  it('多数回まわしても、実装の誤りを示す拒否が出ない', () => {
+    const failures = Array.from({ length: 50 }, (_unused, seed) =>
+      run({ scenario: CLOSING, seed }),
+    ).filter((result) => result.defects.length > 0);
+    expect(failures.map((result) => result.seed)).toEqual([]);
+  });
+});
+
 describe('確認要の席を次の人に委ねる（7.11 の 3 層目）', () => {
   const SEEDS: readonly number[] = [2026, 7, 99, 31];
 

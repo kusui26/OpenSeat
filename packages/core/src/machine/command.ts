@@ -21,6 +21,7 @@
 
 import type { TableId, Tag, TicketId } from '../domain/ids.js';
 import type { EndReason } from '../domain/ticket.js';
+import type { Timestamp } from '../time.js';
 
 /**
  * コマンドを出した人。
@@ -257,6 +258,80 @@ export interface HeartbeatCommand {
   readonly ticketId: TicketId;
 }
 
+// ---- 施設の操作（全体プラン 7.14、7.9） ----
+
+/**
+ * 運用の開始（全体プラン 7.14）。
+ *
+ * 対象席を自由席から取り戻し、受付を開く。スケジュールによる開始も、スタッフの
+ * 手動 ON も、どちらもこのコマンドで表す。**どちらが優先かは呼ぶ側が決める**
+ * （7.14「スタッフの手動 ON/OFF を優先させる」）。core から見れば同じ操作である。
+ *
+ * `closesAt` は **この営業回が終わる時刻**。曜日と時間帯の設定（`managed_schedule`）を
+ * 施設のタイムゾーンで評価するのは境界側の責務で（9.4）、`schedule.ts` の
+ * `closesAtOf()` がその計算を提供する。`null` を渡すと運用終了を持たない
+ * （スタッフが手動で閉じるまで続く）。
+ */
+export interface OpenCommand {
+  readonly type: 'OPEN';
+  readonly closesAt: Timestamp | null;
+  readonly by: Actor;
+}
+
+/**
+ * 運用の終了（全体プラン 7.14）。
+ *
+ * 待っている人（`WAITING` / `PAUSED`）を施設都合で取り消し、使っていない席を
+ * 対象外に戻す。**席を確保した人（`CALLED`）と着席中の人（`SEATED`）はそのまま**
+ * で、その席は現在の利用が終わってから外れる（`disableAfterCurrent`、7.4）。
+ *
+ * 時間が来て終わる場合は `tick` が同じ手続きを踏む。これはスタッフが手で
+ * 閉じるときの入口である。
+ */
+export interface CloseCommand {
+  readonly type: 'CLOSE';
+  readonly by: Actor;
+}
+
+/**
+ * 全席解放（全体プラン 7.9 の「施設都合」、12.6）。
+ *
+ * **緊急時にすべてを自由席へ戻す操作。** 生きているチケットをすべて終わらせ、
+ * すべての席を対象外にする。着席中の人も対象になるが、着席した分は利用として
+ * 扱う（`DONE`）。
+ *
+ * **この操作はいつでも動かなければならない**（CLAUDE.md 8 章）。障害時に掲示を
+ * 出して自由席へ戻す手順が、システムの復旧より優先される。
+ */
+export interface ReleaseAllCommand {
+  readonly type: 'RELEASE_ALL';
+  readonly by: Actor;
+}
+
+/**
+ * 席を対象から外す（全体プラン 7.6 のエッジケース）。
+ *
+ * **いま使われている席なら、現在の利用が終わってから外れる**（`disableAfterCurrent`）。
+ * 空いている席はその場で外れる。呼び出し中の人を追い出さないための順序である。
+ */
+export interface DisableTableCommand {
+  readonly type: 'DISABLE_TABLE';
+  readonly tableId: TableId;
+  readonly by: Actor;
+}
+
+/**
+ * 席を対象に戻す（全体プラン 7.6 のエッジケース）。
+ *
+ * 外す操作の裏返し。外れるのを待っている予約も取り消す。運用中なら、その場で
+ * 空席として使えるようになる。
+ */
+export interface EnableTableCommand {
+  readonly type: 'ENABLE_TABLE';
+  readonly tableId: TableId;
+  readonly by: Actor;
+}
+
 export type Command =
   | JoinCommand
   | CancelCommand
@@ -274,7 +349,12 @@ export type Command =
   | ConfirmFreeCommand
   | StillHereCommand
   | ChangePartySizeCommand
-  | HeartbeatCommand;
+  | HeartbeatCommand
+  | OpenCommand
+  | CloseCommand
+  | ReleaseAllCommand
+  | DisableTableCommand
+  | EnableTableCommand;
 
 export type CommandType = Command['type'];
 
@@ -302,4 +382,9 @@ export const COMMAND_TYPES = [
   'STILL_HERE',
   'CHANGE_PARTY_SIZE',
   'HEARTBEAT',
+  'OPEN',
+  'CLOSE',
+  'RELEASE_ALL',
+  'DISABLE_TABLE',
+  'ENABLE_TABLE',
 ] as const satisfies readonly CommandType[];

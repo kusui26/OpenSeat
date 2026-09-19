@@ -176,6 +176,7 @@ export {
   heldTableHasDeadline,
   stateTimestampsAreSet,
   endReasonMatchesState,
+  joinRequiresOperating,
   noStarvation,
   priorityPreservedAcrossPause,
   tickIdempotent,
@@ -220,6 +221,11 @@ export type {
   StillHereCommand,
   ChangePartySizeCommand,
   HeartbeatCommand,
+  OpenCommand,
+  CloseCommand,
+  ReleaseAllCommand,
+  DisableTableCommand,
+  EnableTableCommand,
 } from './machine/command.js';
 export {
   ACTORS,
@@ -228,6 +234,25 @@ export {
   CHECKOUT_END_REASONS,
   COMMAND_TYPES,
 } from './machine/command.js';
+
+// ---- 運用時間帯（Phase 1 PR 11）----
+
+export type {
+  Weekday,
+  LocalTime,
+  ManagedWindow,
+  ManagedSchedule,
+  ScheduleProblem,
+} from './schedule.js';
+export {
+  WEEKDAYS,
+  MINUTES_PER_DAY,
+  windowAt,
+  isManaged,
+  remainingToday,
+  closesAtOf,
+  validateSchedule,
+} from './schedule.js';
 
 export type { Rejection, RejectionCode } from './machine/rejection.js';
 export { REJECTION_CODES, rejection, isDefect } from './machine/rejection.js';
@@ -259,12 +284,17 @@ export type {
   StillHereAsked,
   StillHereAnswered,
   TableNeedsCheck,
+  CloseReason,
+  VenueOpened,
+  JoinClosed,
+  VenueClosed,
 } from './machine/events.js';
 export {
   DOMAIN_EVENT_TYPES,
   PAUSE_REASONS,
   REQUEUE_REASONS,
   NEEDS_CHECK_REASONS,
+  CLOSE_REASONS,
 } from './machine/events.js';
 
 export type { TicketGuardContext, TableGuardContext } from './machine/guards.js';
@@ -305,6 +335,9 @@ export {
   stillHereTimeoutAt,
   unknownAgedAt,
   autoFreeAt,
+  venueCloseAt,
+  joinCutoffAt,
+  venueClosesAt,
 } from './machine/deadlines.js';
 
 // ---- 呼び出し・ホールド・ノーショー（Phase 1 PR 6）----

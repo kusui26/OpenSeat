@@ -153,7 +153,8 @@ const COMMAND_BUILDERS: Readonly<Record<CommandType, CommandBuilder>> = {
   // いるはず）とは別の ID を渡す。
   WALK_IN: (tableId) => ({ type: 'WALK_IN', ticketId: 'walkin', tableId, partySize: 1 }),
 
-  // 座席 QR の画面には出ないもの。
+  // 座席 QR の画面には出ないもの。施設の開閉と席の設定はスタッフ・管理者の操作で、
+  // 座席 QR からは触れない（7.8 の表に無い）。
   JOIN: () => null,
   CANCEL: () => null,
   PAUSE: () => null,
@@ -162,6 +163,11 @@ const COMMAND_BUILDERS: Readonly<Record<CommandType, CommandBuilder>> = {
   STILL_HERE: () => null,
   CHANGE_PARTY_SIZE: () => null,
   HEARTBEAT: () => null,
+  OPEN: () => null,
+  CLOSE: () => null,
+  RELEASE_ALL: () => null,
+  DISABLE_TABLE: () => null,
+  ENABLE_TABLE: () => null,
 };
 
 function commandFor(action: CommandType, tableId: string, ticketId: string | null): Command | null {

@@ -122,6 +122,23 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
+  // 施設の開閉（7.14、7.9）。運用終了は筋書きの途中に来るよう近くに置く。
+  fc
+    .record({
+      closesAt: fc.option(fc.integer({ min: 0, max: 60 }).map((min) => NOW + minutes(min)), {
+        nil: null,
+      }),
+      by: fc.constantFrom<Actor>('user', 'staff'),
+    })
+    .map((fields): Command => ({ type: 'OPEN', ...fields })),
+  fc.constantFrom<Actor>('user', 'staff').map((by): Command => ({ type: 'CLOSE', by })),
+  fc.constantFrom<Actor>('user', 'staff').map((by): Command => ({ type: 'RELEASE_ALL', by })),
+  fc
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'DISABLE_TABLE', ...fields })),
+  fc
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'ENABLE_TABLE', ...fields })),
 );
 
 /**
@@ -440,10 +457,11 @@ describe('時刻起因の遷移が守ること', () => {
   });
 
   /**
-   * この版が作りうる終わり方の一覧。PR ごとに増える。
+   * この版が作りうる終わり方の一覧。
    *
-   * 宣言されている 10 通り（`END_REASONS`）のうち、まだ作れないのは
-   * `venue_closed`（全席解放・PR 11）だけ。想定外の終わり方が混ざれば落ちる。
+   * **宣言されている 10 通り（`END_REASONS`）がすべて揃った。** 最後に残って
+   * いた `venue_closed`（施設都合）は、運用終了と全席解放（7.14、7.9）で
+   * 作られるようになった。想定外の終わり方が混ざれば落ちる。
    */
   const REACHABLE_END_REASONS: readonly EndReason[] = [
     // 時刻が来て終わったもの
@@ -457,9 +475,11 @@ describe('時刻起因の遷移が守ること', () => {
     'staff_cancel',
     'checked_out',
     'staff_checkout',
+    // 施設の都合で終わったもの
+    'venue_closed',
   ];
 
-  it('終わり方は、この版が作れる 9 通りのいずれかになる', () => {
+  it('終わり方は、宣言されている 10 通りのいずれかになる', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, moves, stepMin }) =>
         play(state, moves, stepMin).state.tickets.every(
@@ -470,9 +490,8 @@ describe('時刻起因の遷移が守ること', () => {
     );
   });
 
-  it('宣言されている終わり方のうち、まだ作れないのは 1 つだけ（全席解放・PR 11）', () => {
-    const missing = END_REASONS.filter((reason) => !REACHABLE_END_REASONS.includes(reason));
-    expect([...missing].sort()).toEqual(['venue_closed']);
+  it('宣言されている終わり方が、すべて作れるようになった', () => {
+    expect([...END_REASONS].sort()).toEqual([...REACHABLE_END_REASONS].sort());
   });
 
   it('呼び出された人には必ず期限が付いている', () => {

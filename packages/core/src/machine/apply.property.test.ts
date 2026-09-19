@@ -89,6 +89,8 @@ const ticketIdArb: fc.Arbitrary<string> = fc.constantFrom(...TICKET_IDS, CALLED_
 
 const tableIdArb: fc.Arbitrary<string> = fc.constantFrom('tb0', 'tb1', 'tb2', HELD_TABLE_ID, 'missing');
 
+const actorArb: fc.Arbitrary<Actor> = fc.constantFrom<Actor>('user', 'staff');
+
 const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
     .record({
@@ -140,6 +142,19 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .map((fields): Command => ({ type: 'CHANGE_PARTY_SIZE', ...fields })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'STILL_HERE', ticketId })),
+  // 施設の開閉（7.14、7.9）。運用終了の時刻は、筋書きの途中に来るよう近くに置く。
+  fc
+    .record({
+      closesAt: fc.option(fc.integer({ min: 0, max: 40 }).map((min) => NOW + minutes(min)), {
+        nil: null,
+      }),
+      by: actorArb,
+    })
+    .map((fields): Command => ({ type: 'OPEN', ...fields })),
+  actorArb.map((by): Command => ({ type: 'CLOSE', by })),
+  actorArb.map((by): Command => ({ type: 'RELEASE_ALL', by })),
+  fc.record({ tableId: tableIdArb, by: actorArb }).map((fields): Command => ({ type: 'DISABLE_TABLE', ...fields })),
+  fc.record({ tableId: tableIdArb, by: actorArb }).map((fields): Command => ({ type: 'ENABLE_TABLE', ...fields })),
 );
 
 const scenarioArb = fc.record({
