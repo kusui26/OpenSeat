@@ -20,11 +20,17 @@
 
 import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import type { EndReason } from '../domain/ticket.js';
+import type { TicketOrigin } from './ticket-machine.js';
 import type { AssignmentReason } from '../allocation/choose.js';
 import type { Timestamp } from '../time.js';
 import type { Actor, CancelReason } from './command.js';
 
-/** 受付が済んだ（全体プラン 7.5）。 */
+/**
+ * チケットが作られた（全体プラン 7.5、7.12）。
+ *
+ * 入口の受付から並んだ場合（`JOIN`）と、空席の QR から直接座った場合
+ * （`WALK_IN`）の 2 つがある。後者は待ち行列を経ずに `SEATED` から始まる。
+ */
 export interface TicketJoined {
   readonly type: 'TicketJoined';
   readonly at: Timestamp;
@@ -32,6 +38,7 @@ export interface TicketJoined {
   /** ボードと口頭の呼び出しに使う短いコード。 */
   readonly code: TicketCode;
   readonly partySize: number;
+  readonly origin: TicketOrigin;
 }
 
 /**
@@ -103,16 +110,56 @@ export interface TicketResumed {
   readonly ticketId: TicketId;
 }
 
+/** なぜ待ちへ戻ったか。順番の扱いが逆になるので、必ず区別する。 */
+export const REQUEUE_REASONS = ['no_show', 'seat_taken'] as const;
+
+export type RequeueReason = (typeof REQUEUE_REASONS)[number];
+
 /**
- * 順番が末尾に戻った（全体プラン 7.7 の 6 の `requeue_back`）。
+ * 保留を挟まずに待ちへ戻った。
  *
- * 保留を挟まずに待ちへ戻る点が「準備OK」と違う。順番はやり直しになる。
+ * | 理由 | 出典 | 順番 |
+ * |---|---|---|
+ * | `no_show` | 7.7 の 6 の `requeue_back` | **末尾へ**。受付時刻をやり直す |
+ * | `seat_taken` | 7.8 の 10 行目、7.11 の 3 層目 | **先頭へ**。受付時刻を保ち、さらに繰り上げる |
+ *
+ * 同じ「待ちへ戻る」でも向きが正反対なので、`priorityAt` だけでなく理由も
+ * 持たせてある。案内した側の落ち度で戻った人を、遅れた人と同じに扱わない。
  */
 export interface TicketRequeued {
   readonly type: 'TicketRequeued';
   readonly at: Timestamp;
   readonly ticketId: TicketId;
   readonly priorityAt: Timestamp;
+  readonly reason: RequeueReason;
+}
+
+/**
+ * 案内する席を変えた（全体プラン 7.8 の 2 行目）。
+ *
+ * 呼び出しは続いたまま、席だけが移る。**期限は動かさない。** すでにその席の
+ * 前に立っている人が、さらに時間を得る理由が無いためである。
+ */
+export interface TicketSwapped {
+  readonly type: 'TicketSwapped';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly fromTableId: TableId;
+  readonly toTableId: TableId;
+}
+
+/**
+ * 席が「使用中」と報告された（全体プラン 7.8 の 10 行目、7.11 の 3 層目）。
+ *
+ * 案内された席に誰かが座っていた場合と、「空いている可能性が高い席」が
+ * 実際には使われていた場合の両方で出る。誰が使っているかは分からない。
+ */
+export interface TableReportedInUse {
+  readonly type: 'TableReportedInUse';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
+  /** 報告した人。第三者やスタッフからの報告なら `null`。 */
+  readonly reportedByTicketId: TicketId | null;
 }
 
 /** 着席した（全体プラン 7.8 の 1 行目）。 */
@@ -206,6 +253,8 @@ export type DomainEvent =
   | TicketPaused
   | TicketResumed
   | TicketRequeued
+  | TicketSwapped
+  | TableReportedInUse
   | TicketSeated
   | TableOccupied
   | TableVacated
@@ -230,6 +279,8 @@ export const DOMAIN_EVENT_TYPES = [
   'TicketPaused',
   'TicketResumed',
   'TicketRequeued',
+  'TicketSwapped',
+  'TableReportedInUse',
   'TicketSeated',
   'TableOccupied',
   'TableVacated',

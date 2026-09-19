@@ -86,6 +86,9 @@ export const TICKET_INITIAL_STATES = {
   WALK_IN: 'SEATED',
 } as const satisfies Readonly<Record<string, TicketState>>;
 
+/** チケットがどこから生まれたか。 */
+export type TicketOrigin = keyof typeof TICKET_INITIAL_STATES;
+
 /**
  * 全体プラン 7.3 の状態遷移図の全矢印。
  *
@@ -342,3 +345,13 @@ export const HEARTBEAT_APPLIES_TO: readonly TicketState[] = [...ACTIVE_TICKET_ST
  * 破れる。席を持ったまま人数を変えたい人は、いったん譲るか取り消す。
  */
 export const PARTY_SIZE_CHANGE_APPLIES_TO: readonly TicketState[] = ['WAITING', 'PAUSED'];
+
+/**
+ * 「使用中」の報告で繰り上げを受けられる状態（全体プラン 7.11 の 3 層目）。
+ *
+ * 「空いている可能性が高い席」に案内された人が、そこが使われていたと報告した
+ * とき。**状態は待ちのまま変わらず、順番の繰り上げだけが起きる**ので、遷移表
+ * ではなくここで宣言する。呼び出された人（`CALLED`）の報告は席を持っているぶん
+ * 扱いが違い、`REPORT_TAKEN` として遷移表にある。
+ */
+export const CONFLICT_PRIORITY_APPLIES_TO: readonly TicketState[] = ['WAITING'];

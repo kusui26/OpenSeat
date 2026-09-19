@@ -15,6 +15,7 @@
  * それまでのあいだ、残りは `unimplementedTicketGuards()` が数え上げる。
  */
 
+import { candidatesFor, pickCandidate } from '../allocation/choose.js';
 import { fitsCapacity, satisfiesTags, type Table } from '../domain/table.js';
 import type { VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
@@ -48,8 +49,7 @@ type TicketGuardPredicate = (context: TicketGuardContext) => boolean;
 /**
  * 実装済みのチケットのガード。
  *
- * 残り 3 つ（`earlyCheckInAllowed`、`swapAllowed`、`hardLimitMode`）は
- * 座席 QR の分岐（PR 9）と着席時間の上限（PR 10）で埋める。
+ * 残るのは `hardLimitMode`（着席時間の上限・PR 10）だけ。
  */
 const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardPredicate>>> = {
   /** 案内しようとしている席に人数が収まり、希望タグを満たすか（7.6）。 */
@@ -64,6 +64,31 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
    * 「その ID が自分の席か」だけである。
    */
   isAssignedTable: ({ ticket, table }) => table !== null && ticket.tableId === table.id,
+
+  /**
+   * 呼び出しを待たずに座ってよいか（7.8 の 4 行目）。
+   *
+   * 7.8 の条件は「空席で、人数が収まり、**この席を待つ人が他にいない**」。
+   * 最後の条件をそのまま「ほかに収まる人が 1 人もいない」と読むと、混んでいる
+   * 施設では誰も前倒しできなくなる。狙いは 7.8 が括弧で書いている
+   * 「待ち順序を崩さない」ことなので、**いまこの席に割り当てるとしたら自分が
+   * 選ばれるか**で判定する。割当の選択（7.6）をそのまま使うので、前倒しで
+   * 座っても順番は 1 つも動かない。
+   */
+  earlyCheckInAllowed: ({ ticket, state, table }) =>
+    table !== null &&
+    table.status === 'FREE' &&
+    table.enabled &&
+    pickCandidate(candidatesFor(table, state.tickets), table, state.policy)?.ticket.id === ticket.id,
+
+  /** 別の空席へ移ってよいか（7.8 の 2 行目）。 */
+  swapAllowed: ({ state, ticket, table }) =>
+    state.policy.allowTableSwap &&
+    table !== null &&
+    table.status === 'FREE' &&
+    table.enabled &&
+    fitsCapacity(table, ticket.partySize) &&
+    satisfiesTags(table, ticket.requiredTags),
 
   /** 「向かっています」をまだ押せるか（7.7 の 4）。 */
   underExtensionLimit: ({ ticket, state }) => canExtendHold(ticket, state.policy),

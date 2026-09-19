@@ -11,6 +11,8 @@ import {
   WEEKEND_PEAK,
   withCheckoutReportRate,
   withPolicy,
+  withUnregisteredRate,
+  withWalkInShare,
   type Scenario,
 } from './scenario.js';
 
@@ -239,6 +241,68 @@ describe('ノーショーと遅刻', () => {
   });
 });
 
+describe('登録せずに席へ向かう人（8.1「無断利用」、7.12「飛び込み」）', () => {
+  /**
+   * 無断利用の率を 8.1 の 0.2 件/卓/時から 1 件へ上げてある。
+   *
+   * 1 時間の短いシナリオでは、8.1 の率だと 1 回の実行に 0〜2 件しか起きず、
+   * 「起きること」と「起きないこと」を見分けられない。**率だけを上げて、
+   * 起きたときの扱いを見る。** 率そのものの妥当性は 8.1 の値で測る。
+   */
+  function withShare(share: number): Scenario {
+    return withWalkInShare(withUnregisteredRate(withCheckoutReportRate(SHORT, 1), 1), share);
+  }
+
+  it('全員が座席 QR を読めば、すべて飛び込み着席として記録される', () => {
+    const result = run({ scenario: withShare(1), seed: 3 });
+    const walkIns = result.events.filter(
+      (event) => event.type === 'TicketJoined' && event.origin === 'WALK_IN',
+    );
+    expect(result.sitters.length).toBeGreaterThan(0);
+    expect(walkIns).toHaveLength(result.sitters.length);
+  });
+
+  /**
+   * **7.12 の狙いが数字で出る。**
+   *
+   * 座席 QR から登録できないと、システムには空席に見えたまま席が使われる。
+   * そこへ案内された人は「誰かが座っています」と報告することになる（7.8 の 10）。
+   */
+  it('誰も読まなければ、案内された席が塞がっていた事故が起きる', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      expect(countOf(run({ scenario: withShare(0), seed }), 'TableReportedInUse')).toBeGreaterThan(0);
+    }
+  });
+
+  it('全員が読めば、その事故は 1 件も起きない', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      expect(countOf(run({ scenario: withShare(1), seed }), 'TableReportedInUse')).toBe(0);
+    }
+  });
+
+  it('無断利用が無ければ、登録せずに座る人も現れない', () => {
+    const none = withUnregisteredRate(withCheckoutReportRate(SHORT, 1), 0);
+    expect(run({ scenario: none, seed: 3 }).sitters).toEqual([]);
+  });
+
+  it('読む割合を変えても、受付から並ぶ人は 1 人も変わらない（共通乱数）', () => {
+    const base = run({ scenario: withShare(0), seed: 8 });
+    const scanning = run({ scenario: withShare(1), seed: 8 });
+    expect(scanning.parties).toEqual(base.parties);
+  });
+
+  it('同じシードなら、登録せずに来る人も同じ', () => {
+    expect(run({ scenario: withShare(0.5), seed: 8 }).sitters).toEqual(
+      run({ scenario: withShare(0.5), seed: 8 }).sitters,
+    );
+  });
+
+  it('8.1 の率（0.2 件/卓/時）でも、飛び込み着席は記録される', () => {
+    const result = run({ scenario: withCheckoutReportRate(WEEKEND_PEAK, 1), seed: 2026 });
+    expect(result.sitters.length).toBeGreaterThan(0);
+  });
+});
+
 describe('不変条件（9.12）', () => {
   /**
    * **100 回の実行で違反ゼロ。** Phase 1 プラン PR 8 の完了条件。
@@ -265,6 +329,12 @@ describe('不変条件（9.12）', () => {
     for (const noShowPolicy of ['cancel', 'requeue_once', 'requeue_back'] as const) {
       const scenario = withPolicy(SHORT, { ...DEFAULT_POLICY, noShowPolicy });
       expect(run({ scenario, seed: 42 }).defects).toEqual([]);
+    }
+  });
+
+  it('登録せずに座る人がいても、違反は出ない', () => {
+    for (const share of [0, 0.5, 1]) {
+      expect(run({ scenario: withWalkInShare(SHORT, share), seed: 42 }).defects).toEqual([]);
     }
   });
 

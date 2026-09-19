@@ -233,12 +233,12 @@ describe('遷移の段（手順 2・3）', () => {
   });
 
   it('判定がまだ書かれていないガードは、通らずに GUARD_NOT_IMPLEMENTED になる', () => {
-    const held = ticketOf(called(state, 'k1', 'tb-2'), 'k1');
-    const moved = ticketTransition({ state, ticket: held, now: NOW, table: null }, 'SWAP_TABLE');
+    const seated: Ticket = { ...ticketOf(state, 'k1'), state: 'SEATED', tableId: 'tb-2', seatedAt: NOW };
+    const moved = ticketTransition({ state, ticket: seated, now: NOW, table: null }, 'AUTO_RELEASE');
     expect(moved.ok).toBe(false);
     if (!moved.ok) {
       expect(moved.error.code).toBe('GUARD_NOT_IMPLEMENTED');
-      expect(moved.error.describe).toContain('swapAllowed');
+      expect(moved.error.describe).toContain('hardLimitMode');
     }
   });
 
@@ -304,7 +304,7 @@ describe('受付（7.5）', () => {
       ),
     );
     expect(decided.events).toEqual([
-      { type: 'TicketJoined', at: NOW, ticketId: 'k1', code: 'A-01', partySize: 2 },
+      { type: 'TicketJoined', at: NOW, ticketId: 'k1', code: 'A-01', partySize: 2, origin: 'JOIN' },
     ]);
   });
 

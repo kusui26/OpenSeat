@@ -113,3 +113,47 @@ export function decidesNoShow(party: Party, waited: DurationMs, scenario: Scenar
   const rate: number = waited > minutes(longWaitFromMin) ? longWaitRate : baseRate;
   return party.noShowRoll < rate;
 }
+
+/**
+ * 登録せずに席へ向かう人（8.1「無断利用」、7.12「飛び込み」）。
+ *
+ * 座席 QR を読むかどうかで、その後がまったく変わる。
+ *
+ * - **読む**: 飛び込み着席として登録される。占有が正確になり、呼び出しの
+ *   事故も起きない（7.12 の狙い）
+ * - **読まない**: システムからは空席に見えたまま席が使われる。そこへ案内
+ *   された人は「誰かが座っています」と報告することになる（7.8 の 10 行目）
+ */
+export interface Sitter {
+  readonly index: number;
+  readonly ticketId: string;
+  readonly arriveAt: Timestamp;
+  readonly partySize: number;
+  readonly stay: DurationMs;
+  /** 座席 QR を読むか。読まなければゴーストになる。 */
+  readonly scans: boolean;
+}
+
+/**
+ * 登録せずに席へ向かう 1 組を作る。
+ *
+ * 到着した組（`createParty`）とは別の流れから引く。無断利用の率を変えても、
+ * 受付から並ぶ人の性質が 1 つも動かないようにするためである（共通乱数）。
+ */
+export function createSitter(
+  seed: number,
+  index: number,
+  arriveAt: Timestamp,
+  scenario: Scenario,
+): Sitter {
+  const rng: Rng = streamFor(seed, 'sitter', index);
+  const partySize: number = discrete(rng, scenario.partySizes) ?? 1;
+  return {
+    index,
+    ticketId: `w${String(index).padStart(4, '0')}`,
+    arriveAt,
+    partySize,
+    stay: Math.round(logNormal(rng, stayMedian(scenario, partySize), scenario.stay.sigma)),
+    scans: bernoulli(rng, scenario.walkInShare),
+  };
+}

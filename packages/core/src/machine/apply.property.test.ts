@@ -87,6 +87,8 @@ const stateArb: fc.Arbitrary<VenueState> = fc
 
 const ticketIdArb: fc.Arbitrary<string> = fc.constantFrom(...TICKET_IDS, CALLED_TICKET_ID, 'missing');
 
+const tableIdArb: fc.Arbitrary<string> = fc.constantFrom('tb0', 'tb1', 'tb2', HELD_TABLE_ID, 'missing');
+
 const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
     .record({
@@ -110,11 +112,29 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'PASS', ticketId })),
   fc
-    .record({ ticketId: ticketIdArb, tableId: fc.constantFrom('tb0', 'tb1', HELD_TABLE_ID, 'missing') })
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
     .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'SWAP_TABLE', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'CHECK_IN_EARLY', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb, partySize: fc.integer({ min: 0, max: 6 }) })
+    .map((fields): Command => ({ type: 'WALK_IN', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'REPORT_TAKEN', ...fields })),
+  fc
+    .record({ ticketId: fc.option(ticketIdArb, { nil: null }), tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'REPORT_IN_USE', ...fields })),
+  fc
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'CONFIRM_FREE', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, partySize: fc.integer({ min: 0, max: 6 }) })
     .map((fields): Command => ({ type: 'CHANGE_PARTY_SIZE', ...fields })),

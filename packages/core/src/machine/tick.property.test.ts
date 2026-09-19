@@ -75,6 +75,8 @@ const stateArb: fc.Arbitrary<VenueState> = fc
 
 const ticketIdArb: fc.Arbitrary<string> = fc.constantFrom(...TICKET_IDS);
 
+const tableIdArb: fc.Arbitrary<string> = fc.constantFrom('tb0', 'tb1', 'tb2');
+
 const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
     .record({
@@ -95,6 +97,51 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
   fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'SWAP_TABLE', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'CHECK_IN_EARLY', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'REPORT_TAKEN', ...fields })),
+  fc
+    .record({ ticketId: fc.option(ticketIdArb, { nil: null }), tableId: tableIdArb })
+    .map((fields): Command => ({ type: 'REPORT_IN_USE', ...fields })),
+  fc
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'CONFIRM_FREE', ...fields })),
+  fc
+    .record({
+      ticketId: fc.constantFrom('w1', 'w2'),
+      tableId: tableIdArb,
+      partySize: fc.integer({ min: 1, max: 4 }),
+    })
+    .map((fields): Command => ({ type: 'WALK_IN', ...fields })),
+  fc
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
+);
+
+/**
+ * 待ち行列の側だけを動かすコマンド。**席を空けるものを含まない。**
+ *
+ * 「空席が無い施設」を前提にする性質で使う。`CONFIRM_FREE` のように席を空席へ
+ * 戻すコマンドが混ざると、前提そのものが途中で崩れてしまう。
+ */
+const queueCommandArb: fc.Arbitrary<Command> = fc.oneof(
+  fc
+    .record({
+      ticketId: ticketIdArb,
+      partySize: fc.integer({ min: 1, max: 4 }),
+      hasNotificationChannel: fc.boolean(),
+    })
+    .map((fields): Command => ({ type: 'JOIN', requiredTags: [], ...fields })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'PAUSE', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'READY', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
+  fc
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
 );
@@ -102,10 +149,14 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
 /** 1 手。コマンドを出すか、時間だけを進める。 */
 type Move = { readonly kind: 'command'; readonly command: Command } | { readonly kind: 'wait' };
 
-const moveArb: fc.Arbitrary<Move> = fc.oneof(
-  commandArb.map((command): Move => ({ kind: 'command', command })),
-  fc.constant<Move>({ kind: 'wait' }),
-);
+function movesOf(commands: fc.Arbitrary<Command>): fc.Arbitrary<Move> {
+  return fc.oneof(
+    commands.map((command): Move => ({ kind: 'command', command })),
+    fc.constant<Move>({ kind: 'wait' }),
+  );
+}
+
+const moveArb: fc.Arbitrary<Move> = movesOf(commandArb);
 
 const scenarioArb = fc.record({
   state: stateArb,
@@ -113,14 +164,20 @@ const scenarioArb = fc.record({
   stepMin: fc.integer({ min: 1, max: 12 }),
 });
 
-/** 空席が 1 つも無い施設。呼び出しが起きないので、期限の処理だけを取り出せる。 */
-const crowdedScenarioArb = scenarioArb.map((scenario) => ({
-  ...scenario,
-  state: {
-    ...scenario.state,
-    tables: scenario.state.tables.map((item) => ({ ...item, status: 'OCCUPIED_UNKNOWN' as const })),
-  },
-}));
+/**
+ * 空席が 1 つも無い施設。呼び出しが起きないので、期限の処理だけを取り出せる。
+ *
+ * コマンドも待ち行列の側だけに絞る。席を空けるコマンドが混ざると、
+ * 「空席が無い」という前提が途中で崩れる。
+ */
+const crowdedScenarioArb = fc.record({
+  state: stateArb.map((state) => ({
+    ...state,
+    tables: state.tables.map((item) => ({ ...item, status: 'OCCUPIED_UNKNOWN' as const })),
+  })),
+  moves: fc.array(movesOf(queueCommandArb), { minLength: 1, maxLength: 25 }),
+  stepMin: fc.integer({ min: 1, max: 12 }),
+});
 
 // ---- 実行 ----
 
