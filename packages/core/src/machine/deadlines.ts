@@ -16,6 +16,7 @@
 
 import type { Policy } from '../domain/policy.js';
 import type { Table } from '../domain/table.js';
+import type { VenueState } from '../domain/state.js';
 import type { Ticket } from '../domain/ticket.js';
 import { minutes, type DurationMs, type Timestamp } from '../time.js';
 import { MAX_AGE_APPLIES_TO } from './ticket-machine.js';
@@ -121,6 +122,117 @@ export function closedPause(
 ): Pick<Ticket, 'pauseDeadline' | 'pausedSince' | 'pausedTotal'> {
   const spent: DurationMs = ticket.pausedSince === null ? 0 : Math.max(0, now - ticket.pausedSince);
   return { pauseDeadline: null, pausedSince: null, pausedTotal: ticket.pausedTotal + spent };
+}
+
+// ---- 着席時間の上限（全体プラン 7.10） ----
+
+/**
+ * 上限をいま評価してよいか。
+ *
+ * `limitOnlyWhenWaiting`（既定 true）が立っているあいだは、**待っている人が
+ * いなければ誰も急かさない**。7.10 が「『上限がある』ことへの心理的抵抗を
+ * もっとも下げる」として選んだ既定である。待ちの有無は刻々と変わるので、
+ * 評価のたびに見る。
+ */
+function limitApplies(state: VenueState): boolean {
+  if (state.policy.timeLimitMode === 'off') return false;
+  if (!state.policy.limitOnlyWhenWaiting) return true;
+  return state.tickets.some((ticket) => ticket.state === 'WAITING');
+}
+
+/**
+ * 「目安時間になりました」を出す時刻（7.10 の `soft`）。
+ *
+ * すでに出したあとなら `null`。上限そのものの時刻で、猶予は含まない。
+ */
+export function timeLimitNoticeAt(ticket: Ticket, state: VenueState): Timestamp | null {
+  if (ticket.state !== 'SEATED' || ticket.seatedAt === null) return null;
+  if (ticket.timeLimitNoticedAt !== null || !limitApplies(state)) return null;
+  return ticket.seatedAt + minutes(state.policy.timeLimitMin);
+}
+
+/** その人が座っている席が、すでに「確認要」に落ちているか。 */
+function seatIsUncertain(state: VenueState, ticket: Ticket): boolean {
+  const table = state.tables.find((item) => item.id === ticket.tableId);
+  return table?.status === 'NEEDS_CHECK';
+}
+
+/**
+ * 上限と猶予を過ぎて、席を「確認要」に落とす時刻（7.10）。
+ *
+ * `soft` でも `hard` でも席は同じように動く。**違うのはチケットの側**で、
+ * `hard` だけがチケットを終わらせる（`hardLimitMode` のガード）。
+ *
+ * **すでに「確認要」なら、やることが残っているのは `hard` だけである。**
+ * 既定値では問いかけの無応答（50 + 5 分）が上限と猶予（60 + 15 分）より先に
+ * 来るので、席のほうは先に落ちていることがある。`soft` でそのまま返し続けると
+ * 同じ処理を繰り返してしまうので、ここで止める。
+ *
+ * **その人が居ると分かったあとも、もう落とさない。** 上限の超過は「空いている
+ * かもしれない」という疑いであって、居ることが確かめられた時点で疑いは晴れる
+ * （7.11 の 2 層目）。晴れたあとに落とし続けると、「まだ利用中」と答えた人の
+ * 席が 1 分後にまた確認要になる。`soft` は自動で席を取り上げない方針なので
+ * （7.10）、そこから先はスタッフの確認（4 層目）に任せる。
+ */
+export function overstayAt(ticket: Ticket, state: VenueState): Timestamp | null {
+  if (ticket.state !== 'SEATED' || ticket.seatedAt === null) return null;
+  if (!limitApplies(state)) return null;
+  if (seatIsUncertain(state, ticket) && state.policy.timeLimitMode !== 'hard') return null;
+  const policy: Policy = state.policy;
+  const due: Timestamp = ticket.seatedAt + minutes(policy.timeLimitMin) + minutes(policy.overstayGraceMin);
+  return presenceConfirmedAfter(ticket, due) ? null : due;
+}
+
+/** その時刻より後に「まだ利用中」が分かっているか。 */
+function presenceConfirmedAfter(ticket: Ticket, due: Timestamp): boolean {
+  return ticket.stillHereAnsweredAt !== null && ticket.stillHereAnsweredAt >= due;
+}
+
+// ---- 整合性の回復（全体プラン 7.11 の 2 層目） ----
+
+/**
+ * 「まだご利用中ですか」を出す時刻。
+ *
+ * **上限モードが `off` でも動く。** これは上限の仕掛けではなく、退席ボタンの
+ * 押し忘れを拾うためのものだからである（7.10 の末尾）。目安は施設の滞在時間
+ * 分布の 90 パーセンタイル。
+ */
+export function stillHereAskAt(ticket: Ticket, policy: Policy): Timestamp | null {
+  if (ticket.state !== 'SEATED' || ticket.seatedAt === null) return null;
+  if (ticket.stillHereAskedAt !== null) return null;
+  return ticket.seatedAt + minutes(policy.stillHerePromptMin);
+}
+
+/**
+ * 問いかけへの無応答を「確認要」とみなす時刻。
+ *
+ * 答えがあれば `null`。**すでに「確認要」に落ちていても `null`** で、
+ * 同じ処理を繰り返さない。
+ */
+export function stillHereTimeoutAt(ticket: Ticket, state: VenueState): Timestamp | null {
+  if (ticket.state !== 'SEATED' || ticket.stillHereAskedAt === null) return null;
+  if (ticket.stillHereAnsweredAt !== null || seatIsUncertain(state, ticket)) return null;
+  return ticket.stillHereAskedAt + minutes(state.policy.stillHereTimeoutMin);
+}
+
+// ---- 席の期限（全体プラン 7.6、7.11 の 5 層目） ----
+
+/** 無断利用の想定滞在時間が過ぎ、「確認要」に落とす時刻（7.11 の 5 層目）。 */
+export function unknownAgedAt(table: Table, policy: Policy): Timestamp | null {
+  if (table.status !== 'OCCUPIED_UNKNOWN') return null;
+  return table.statusSince + minutes(policy.unknownOccupancyToCheckMin);
+}
+
+/**
+ * 「確認要」のまま放置された席を、自動で空席に戻す時刻（7.11 の 5 層目）。
+ *
+ * **`needsCheckAutoFreeMin` が `null` なら戻さない。** 7.11 は「最悪でも席が
+ * 永久に塞がらない」と書いているが、**その保証はこの自動解放を入れたときに
+ * だけ成り立つ。** 切るとスタッフの確認を待つことになる。
+ */
+export function autoFreeAt(table: Table, policy: Policy): Timestamp | null {
+  if (table.status !== 'NEEDS_CHECK' || policy.needsCheckAutoFreeMin === null) return null;
+  return table.statusSince + minutes(policy.needsCheckAutoFreeMin);
 }
 
 // ---- 席の期限（全体プラン 7.6） ----

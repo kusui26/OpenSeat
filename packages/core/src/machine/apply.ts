@@ -43,7 +43,7 @@ import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import { err, ok, type Result } from '../result.js';
 import { minutes, type Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
-import { settle, type Draft, type Outcome } from './settle.js';
+import { reclaimSeat, settle, type Draft, type Outcome } from './settle.js';
 import {
   CANCEL_END_REASONS,
   CHECKOUT_END_REASONS,
@@ -56,6 +56,7 @@ import {
   type ConfirmFreeCommand,
   type ReportInUseCommand,
   type ReportTakenCommand,
+  type StillHereCommand,
   type SwapTableCommand,
   type WalkInCommand,
   type ChangePartySizeCommand,
@@ -440,10 +441,14 @@ function swappedEvents(ticket: Ticket, toTableId: TableId, now: Timestamp): read
 }
 
 /**
- * 呼び出しを待たずに座る（7.8 の 4 行目）。
+ * 呼び出しを待たずに座る（7.8 の 4 行目、7.11 の 3 層目）。
  *
  * **待ち順序を崩さない条件つき。** その席にいま割り当てるとしたら自分が選ばれる
  * 場合だけ通る（`earlyCheckInAllowed`）。
+ *
+ * 「確認要」の席もここを通る。7.11 の 3 層目で案内された人が、着いてみて空いて
+ * いたときの道である。**前の利用者の記録が残っていれば、その人は申告せずに
+ * 去ったものとして終わらせる。** そうしないと 1 つの席に 2 枚のチケットが残る。
  */
 function handleCheckInEarly(state: VenueState, command: CheckInEarlyCommand, now: Timestamp): Outcome {
   const found = requireTicketAndTable(state, command.ticketId, command.tableId);
@@ -455,7 +460,10 @@ function handleCheckInEarly(state: VenueState, command: CheckInEarlyCommand, now
   const occupied = tableTransition({ state, table, now }, 'CHECK_IN_EARLY');
   if (!occupied.ok) return err(occupied.error);
 
-  return ok(seatedDraft(state, ticket, table, moved.value, occupied.value, now));
+  const cleared = reclaimSeat(state, table.occupantTicketId, now);
+  if (!cleared.ok) return err(cleared.error);
+  const seated = seatedDraft(cleared.value.state, ticket, table, moved.value, occupied.value, now);
+  return ok({ state: seated.state, events: [...cleared.value.events, ...seated.events] });
 }
 
 /**
@@ -592,27 +600,73 @@ function handleReportInUse(state: VenueState, command: ReportInUseCommand, now: 
 
   const moved = tableTransition({ state, table, now }, 'REPORT_IN_USE');
   if (!moved.ok) return err(moved.error);
-  const occupied: Table = { ...table, status: moved.value, statusSince: now, occupantTicketId: null };
 
-  const reporter = command.ticketId === null ? null : findTicket(state, command.ticketId);
+  const settled = settleReportedTable(state, table, moved.value, now);
+  if (!settled.ok) return err(settled.error);
+
+  const reporter = command.ticketId === null ? null : findTicket(settled.value.state, command.ticketId);
   const events: DomainEvent[] = [
     { type: 'TableReportedInUse', at: now, tableId: table.id, reportedByTicketId: reporter?.id ?? null },
+    ...settled.value.events,
   ];
   if (reporter === undefined) return err(rejection('TICKET_NOT_FOUND', 'そのチケットは存在しない'));
-  if (reporter === null) return ok({ state: withTable(state, occupied), events });
+  if (reporter === null) return ok({ state: settled.value.state, events });
 
   const allowed: Rejection | null = checkAppliesTo(reporter, CONFLICT_PRIORITY_APPLIES_TO, '使用中の報告');
   if (allowed !== null) return err(allowed);
   const prioritised: Ticket = { ...reporter, conflictPriority: true };
   events.push(requeuedEvent(reporter.id, reporter.priorityAt, 'seat_taken', now));
-  return ok({ state: withTicket(withTable(state, occupied), prioritised), events });
+  return ok({ state: withTicket(settled.value.state, prioritised), events });
+}
+
+/**
+ * 「使用中」と報告された席を書き換える。
+ *
+ * 行き先は遷移表が決めている（`seatHasOccupant`）。着席の記録が残っている席なら
+ * `OCCUPIED` に戻り、**その記録の人が居たと分かる**。誰の記録も無ければ
+ * `OCCUPIED_UNKNOWN`。
+ *
+ * 記録の人に戻すときは、**問いかけ（7.11 の 2 層目）の決着もここでつける。**
+ * 本人は答えていないが、第三者が「使われている」と見たことは答えと同じ重みの
+ * 事実である。決着をつけないと、無応答の期限が過ぎたままなので、次の `tick` で
+ * すぐまた「確認要」に落ちて同じことを繰り返す。
+ */
+function settleReportedTable(
+  state: VenueState,
+  table: Table,
+  to: TableStatus,
+  now: Timestamp,
+): Outcome {
+  const keepsOccupant: boolean = to === 'OCCUPIED';
+  const next: Table = {
+    ...table,
+    status: to,
+    statusSince: now,
+    occupantTicketId: keepsOccupant ? table.occupantTicketId : null,
+  };
+  const withNext: VenueState = withTable(state, next);
+  return keepsOccupant ? confirmOccupant(withNext, next, now) : ok({ state: withNext, events: [] });
+}
+
+/** その席に残っていた人が、居ると分かった。問いかけの決着をここでつける。 */
+function confirmOccupant(state: VenueState, table: Table, now: Timestamp): Outcome {
+  const occupant: Ticket | undefined =
+    table.occupantTicketId === null ? undefined : findTicket(state, table.occupantTicketId);
+  if (occupant === undefined) return ok({ state, events: [] });
+
+  return ok({
+    state: withTicket(state, { ...occupant, stillHereAnsweredAt: now }),
+    events: [{ type: 'TableOccupied', at: now, tableId: table.id, occupantTicketId: occupant.id }],
+  });
 }
 
 /**
  * この席は空いている、という報告（7.8 の 9 行目、7.11 の 3〜4 層目）。
  *
  * 誰が座っているか分かっている席（`OCCUPIED`）には遷移が宣言されていないので、
- * 第三者が着席中の人を追い出すことはできない。
+ * 第三者が着席中の人を追い出すことはできない。**「確認要」に落ちた席だけが、
+ * 着席の記録を持ったまま空席に戻りうる。** そこまで落ちた席は、システムの側が
+ * すでに「その人が居るか分からない」と認めた席である。
  */
 function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: Timestamp): Outcome {
   const table: Table | undefined = findTable(state, command.tableId);
@@ -621,18 +675,21 @@ function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: 
   const moved = tableTransition({ state, table, now }, 'CONFIRM_FREE');
   if (!moved.ok) return err(moved.error);
 
-  const freed: Table = {
-    ...table,
-    status: moved.value,
-    statusSince: now,
-    occupantTicketId: null,
-    // 人が見て空だと確かめた。席の並び順で、いちばん確からしい空席になる（7.6）。
-    verifiedFreeAt: now,
-  };
+  // 着席の記録が残ったままなら、その人は申告せずに去っている（7.11）。
+  const cleared = reclaimSeat(withTable(state, verifiedFree(table, moved.value, now)), table.occupantTicketId, now);
+  if (!cleared.ok) return err(cleared.error);
   return ok({
-    state: withTable(state, freed),
-    events: [{ type: 'TableFreed', at: now, tableId: table.id, releasedTicketId: null }],
+    state: cleared.value.state,
+    events: [
+      { type: 'TableFreed', at: now, tableId: table.id, releasedTicketId: null },
+      ...cleared.value.events,
+    ],
   });
+}
+
+/** 人が見て空だと確かめた席。席の並び順で、いちばん確からしい空席になる（7.6）。 */
+function verifiedFree(table: Table, to: TableStatus, now: Timestamp): Table {
+  return { ...table, status: to, statusSince: now, occupantTicketId: null, verifiedFreeAt: now };
 }
 
 function requeuedEvent(
@@ -695,6 +752,52 @@ function requireCalledAt(
   return requireTicketAndTable(state, ticketId, tableId);
 }
 
+// ---- 「まだご利用中です」（全体プラン 7.11 の 2 層目） ----
+
+/**
+ * 問いかけへの答え。
+ *
+ * **答えたことを記録するだけで、利用は続く。** 席がすでに「確認要」に落ちて
+ * いれば使用中に戻す。落ちる前に答えれば、席は動かない（`OCCUPIED` のまま）。
+ */
+function handleStillHere(state: VenueState, command: StillHereCommand, now: Timestamp): Outcome {
+  const found = requireTicket(state, command.ticketId);
+  if (!found.ok) return err(found.error);
+  const ticket: Ticket = found.value;
+
+  const table: Table | null = tableOf(state, ticket);
+  const moved = ticketTransition({ state, ticket, now, table }, 'STILL_HERE');
+  if (!moved.ok) return err(moved.error);
+  if (table === null) return err(rejection('TABLE_NOT_FOUND', '着席中のチケットに席が無い'));
+
+  const answered: Ticket = { ...ticket, state: moved.value, stillHereAnsweredAt: now };
+  const restored = restoreTable(state, table, now);
+  if (!restored.ok) return err(restored.error);
+
+  return ok({
+    state: withTicket(restored.value.state, answered),
+    events: [
+      { type: 'StillHereAnswered', at: now, ticketId: ticket.id, tableId: table.id },
+      ...restored.value.events,
+    ],
+  });
+}
+
+/** 「確認要」に落ちていた席を、使用中に戻す。落ちていなければ何もしない。 */
+function restoreTable(state: VenueState, table: Table, now: Timestamp): Outcome {
+  if (table.status !== 'NEEDS_CHECK') return ok({ state, events: [] });
+
+  const moved = tableTransition({ state, table, now }, 'STILL_HERE');
+  if (!moved.ok) return err(moved.error);
+  const occupied: Table = { ...table, status: moved.value, statusSince: now };
+  return ok({
+    state: withTable(state, occupied),
+    events: [
+      { type: 'TableOccupied', at: now, tableId: table.id, occupantTicketId: table.occupantTicketId ?? '' },
+    ],
+  });
+}
+
 // ---- 人数の変更（全体プラン 7.6 のエッジケース） ----
 
 function handleChangePartySize(state: VenueState, command: ChangePartySizeCommand, now: Timestamp): Outcome {
@@ -749,10 +852,10 @@ function handleHeartbeat(state: VenueState, command: HeartbeatCommand, now: Time
  * コマンドを担当する処理へ振り分ける（手順 1〜4）。
  *
  * 種別ごとに 1 行ずつ並べるだけの分岐で、絡んだ条件は無い。分岐の数がそのまま
- * 複雑度として数えられるが、分けても読みやすくならないのでこの関数だけ外す。
- * 書き忘れは `switch-exhaustiveness-check` が捕まえる（型で守られている）。
+ * 複雑度と行数として数えられるが、分けても読みやすくならないのでこの関数だけ
+ * 外す。書き忘れは `switch-exhaustiveness-check` が捕まえる（型で守られている）。
  */
-// eslint-disable-next-line complexity
+// eslint-disable-next-line complexity, max-lines-per-function
 function route(state: VenueState, command: Command, now: Timestamp): Outcome {
   switch (command.type) {
     case 'JOIN': return handleJoin(state, command, now);
@@ -769,6 +872,7 @@ function route(state: VenueState, command: Command, now: Timestamp): Outcome {
     case 'REPORT_TAKEN': return handleReportTaken(state, command, now);
     case 'REPORT_IN_USE': return handleReportInUse(state, command, now);
     case 'CONFIRM_FREE': return handleConfirmFree(state, command, now);
+    case 'STILL_HERE': return handleStillHere(state, command, now);
     case 'CHANGE_PARTY_SIZE': return handleChangePartySize(state, command, now);
     case 'HEARTBEAT': return handleHeartbeat(state, command, now);
   }

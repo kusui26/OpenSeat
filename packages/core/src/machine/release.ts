@@ -39,11 +39,32 @@ export function clearedHoldDeadline(): Pick<Ticket, 'holdDeadline' | 'holdRemind
 }
 
 /**
+ * 着席中に出した一度きりの知らせの記録を消す。
+ *
+ * 「まだご利用中ですか」と「目安時間になりました」を出したかどうかは、
+ * **着席しているあいだだけ意味を持つ**。終わったチケットに残しておくと、
+ * 不変条件 10（その状態のときだけ入る）が破れる。
+ *
+ * 消しても記録は失われない。**いつ出したかはイベントに残っている**。
+ * 状態に置いておくのは「もう出したか」を判断するためだけである。
+ */
+export function clearedSeatedNotices(): Pick<
+  Ticket,
+  'stillHereAskedAt' | 'stillHereAnsweredAt' | 'timeLimitNoticedAt'
+> {
+  return { stillHereAskedAt: null, stillHereAnsweredAt: null, timeLimitNoticedAt: null };
+}
+
+/**
  * 終端へ落ちたチケットの欄を揃える。
  *
  * 席との結びつきとホールドの期限を必ず外す。残っていると、その席が誰にも
  * 割り当てられなくなり、`terminal_holds_no_table` が破れる。保留中だった場合は
  * その分の時間を合計へ足し込んでから閉じる。
+ *
+ * **節目の時刻（`calledAt`、`seatedAt`）は残し、一度きりの印は消す。** 節目は
+ * 終わったあとも統計と問い合わせに要るが、印は「もう出したか」を判断するため
+ * だけのもので、終わったチケットには意味が無い。
  */
 export function endedTicket(
   ticket: Ticket,
@@ -54,6 +75,7 @@ export function endedTicket(
   return {
     ...ticket,
     ...clearedHold(),
+    ...clearedSeatedNotices(),
     ...closedPause(ticket, now),
     state: to,
     endedAt: now,

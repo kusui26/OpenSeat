@@ -47,12 +47,20 @@ describe('実装の進み具合', () => {
    * 残っているガードの数を明示して、増えないようにする。
    * PR 12 でここが空になる（`ticket-machine.ts` の冒頭の約束）。
    */
-  it('チケットのガードは 10 個中 9 個が実装済み（残るのは着席時間の上限）', () => {
-    expect([...unimplementedTicketGuards()].sort()).toEqual(['hardLimitMode']);
+  /**
+   * **宣言されたガードがすべて実装された。**
+   *
+   * `ticket-machine.ts` の冒頭が「PR 12 で閉じる」と約束していたもので、
+   * 着席時間の上限（`hardLimitMode`）と確認要の自動解放（`autoFreeEnabled`）が
+   * 入ったこの版で 0 になった。**ここが空でなくなったら、遷移が黙って
+   * 通らなくなっている**ので、ガードを足したら必ず実装すること。
+   */
+  it('チケットのガードは 10 個すべてが実装済み', () => {
+    expect(unimplementedTicketGuards()).toEqual([]);
   });
 
-  it('席のガードは 3 個中 2 個が実装済み（残るのは確認要の自動解放）', () => {
-    expect([...unimplementedTableGuards()].sort()).toEqual(['autoFreeEnabled']);
+  it('席のガードは 3 個すべてが実装済み', () => {
+    expect(unimplementedTableGuards()).toEqual([]);
   });
 
   it('実装済みかどうかの判定は、宣言されたすべてのガードについて答えられる', () => {
@@ -61,10 +69,32 @@ describe('実装の進み具合', () => {
     }
   });
 
+  /**
+   * いまは未実装のガードが無いので、この検査は空振りする。**仕掛けは残す。**
+   * 遷移を足してガードを書き忘れたときに、黙って通らないための備えである。
+   */
   it('実装されていないガードは成立しない（書き忘れた遷移を黙って通さない）', () => {
     for (const guard of unimplementedTicketGuards()) {
       expect(holds(guard)).toBe(false);
     }
+  });
+
+  it('hardLimitMode は hard モードのときだけ成立する（7.10）', () => {
+    for (const mode of ['off', 'soft', 'hard'] as const) {
+      const state = venue({ ...DEFAULT_POLICY, timeLimitMode: mode });
+      expect(holds('hardLimitMode', { state })).toBe(mode === 'hard');
+    }
+  });
+
+  it('autoFreeEnabled は自動解放が設定されているときだけ成立する（7.11 の 5 層目）', () => {
+    const on = { state: venue(DEFAULT_POLICY), table: table(4), now: NOW };
+    const off = {
+      state: venue({ ...DEFAULT_POLICY, needsCheckAutoFreeMin: null }),
+      table: table(4),
+      now: NOW,
+    };
+    expect(evaluateTableGuard(on, 'autoFreeEnabled')).toBe(true);
+    expect(evaluateTableGuard(off, 'autoFreeEnabled')).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type NoShowPolicy, type Policy } from '../domain/policy.js';
-import { createTable, type Table } from '../domain/table.js';
+import { createTable, type Table, type TableStatus } from '../domain/table.js';
 import { END_REASONS, isTerminal, type EndReason, type Ticket } from '../domain/ticket.js';
 import { createVenueState, sameVenueState, type VenueState } from '../domain/state.js';
 import { checkInvariants } from '../invariant.js';
@@ -90,6 +90,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'PASS', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'STILL_HERE', ticketId })),
   fc
     .record({ ticketId: ticketIdArb, tableId: fc.constantFrom('tb0', 'tb1', 'tb2') })
     .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
@@ -141,6 +142,7 @@ const queueCommandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'READY', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'EXTEND', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
+  ticketIdArb.map((ticketId): Command => ({ type: 'STILL_HERE', ticketId })),
   fc
     .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
@@ -165,15 +167,17 @@ const scenarioArb = fc.record({
 });
 
 /**
- * 空席が 1 つも無い施設。呼び出しが起きないので、期限の処理だけを取り出せる。
+ * 席が 1 つも使えない施設。呼び出しが起きないので、期限の処理だけを取り出せる。
  *
- * コマンドも待ち行列の側だけに絞る。席を空けるコマンドが混ざると、
- * 「空席が無い」という前提が途中で崩れる。
+ * **席を「対象外」にしてある。** 以前は「使用中（誰か分からない）」にしていたが、
+ * 整合性の回復（7.11 の 5 層目）が入って、時間が経つと確認要を経て空席に戻る
+ * ようになった。時間そのものが前提を壊すので、時刻起因の遷移をまったく持たない
+ * 状態を選ぶ。コマンドも待ち行列の側だけに絞る（席を空けるものを混ぜない）。
  */
 const crowdedScenarioArb = fc.record({
   state: stateArb.map((state) => ({
     ...state,
-    tables: state.tables.map((item) => ({ ...item, status: 'OCCUPIED_UNKNOWN' as const })),
+    tables: state.tables.map((item) => ({ ...item, status: 'DISABLED' as const })),
   })),
   moves: fc.array(movesOf(queueCommandArb), { minLength: 1, maxLength: 25 }),
   stepMin: fc.integer({ min: 1, max: 12 }),
@@ -330,6 +334,89 @@ describe('tick が決して破らないこと', () => {
   });
 });
 
+describe('席が永久に塞がらない（7.11 の 5 層目）', () => {
+  /**
+   * **この PR の価値の中心にある性質。**
+   *
+   * 7.11 は 5 層の対策を重ねて「最悪でも席が永久に塞がらない」と書いている。
+   * それが本当かを、**どんな状態から始めても、時間を十分に進めれば
+   * すべての席が空席か対象外に落ち着く**という形で確かめる。
+   *
+   * 落ち着く道筋は席の状態ごとに違う。
+   *
+   * | 始まり | 道筋 |
+   * |---|---|
+   * | `HELD` | ホールドの期限切れ → 空席（7.7） |
+   * | `OCCUPIED` | 問いかけ → 無応答 → 確認要 → 自動解放（7.11 の 2・5） |
+   * | `OCCUPIED_UNKNOWN` | 想定滞在時間 → 確認要 → 自動解放（7.11 の 5） |
+   * | `TURNOVER` | 片付けの猶予 → 空席（7.6） |
+   * | `NEEDS_CHECK` | 自動解放 → 空席（7.11 の 5） |
+   *
+   * **`needs_check_auto_free_min` を入れたときにだけ成り立つ。** 切った施設では
+   * スタッフの確認を待つことになる（下のテストで確かめている）。
+   */
+  const settledStatuses: readonly TableStatus[] = ['FREE', 'DISABLED'];
+
+  /**
+   * 落ち着くまで時間だけを進める。
+   *
+   * 1 回の大きな `tick` では足りない。空いた席には次の人が呼ばれ、その呼び出しの
+   * 期限は「いま」から先にあるからで、**何度か刻まないと循環が終わらない**。
+   * 15 分ごとに 6 時間ぶん進める。いちばん長い道筋（着席 → 問いかけ 50 分 →
+   * 無応答 5 分 → 自動解放 30 分）と、呼び出しの繰り返しを合わせても足りる長さ。
+   */
+  function settleDown(state: VenueState, from: Timestamp): VenueState {
+    let current: VenueState = state;
+    for (let step = 1; step <= 24; step += 1) {
+      current = tickedState(current, from + minutes(15) * step);
+    }
+    return current;
+  }
+
+  it('どんな筋書きのあとでも、時間を十分に進めれば席が空く', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const built = play(state, moves, stepMin).state;
+        const settled = settleDown(built, endOf(moves, stepMin));
+        return settled.tables.every((table) => settledStatuses.includes(table.status));
+      }),
+      RUNS,
+    );
+  });
+
+  it('そのとき、すべてのチケットも終わっている', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, moves, stepMin }) => {
+        const built = play(state, moves, stepMin).state;
+        const settled = settleDown(built, endOf(moves, stepMin));
+        return settled.tickets.every((ticket) => isTerminal(ticket.state));
+      }),
+      RUNS,
+    );
+  });
+
+  /**
+   * **自動解放を切ると、この保証は消える。**
+   *
+   * 7.11 の 5 層目は `off` も許している。切った施設では「確認要」の席が
+   * スタッフの確認まで残る。性質が条件つきであることを、逆から確かめる。
+   */
+  it('自動解放を切ると、確認要の席が残ったままになる', () => {
+    const policy: Policy = { ...DEFAULT_POLICY, needsCheckAutoFreeMin: null };
+    const manual: VenueState = {
+      ...createVenueState({
+        venueId: 'v1',
+        policy,
+        tables: [{ ...tableAt('tb0', 4), status: 'NEEDS_CHECK' }],
+      }),
+      operating: true,
+      joinOpen: true,
+    };
+    const settled = settleDown(manual, NOW);
+    expect(settled.tables[0]?.status).toBe('NEEDS_CHECK');
+  });
+});
+
 describe('時刻起因の遷移が守ること', () => {
   it('動いた状態はすべて遷移表に宣言されている', () => {
     fc.assert(
@@ -356,8 +443,7 @@ describe('時刻起因の遷移が守ること', () => {
    * この版が作りうる終わり方の一覧。PR ごとに増える。
    *
    * 宣言されている 10 通り（`END_REASONS`）のうち、まだ作れないのは
-   * `auto_release`（着席時間の上限・PR 10）と `venue_closed`（全席解放・PR 11）。
-   * 想定外の終わり方が混ざれば、ここで落ちる。
+   * `venue_closed`（全席解放・PR 11）だけ。想定外の終わり方が混ざれば落ちる。
    */
   const REACHABLE_END_REASONS: readonly EndReason[] = [
     // 時刻が来て終わったもの
@@ -365,6 +451,7 @@ describe('時刻起因の遷移が守ること', () => {
     'pause_expired',
     'max_age',
     'abandoned',
+    'auto_release',
     // 人の操作で終わったもの
     'user_cancel',
     'staff_cancel',
@@ -372,7 +459,7 @@ describe('時刻起因の遷移が守ること', () => {
     'staff_checkout',
   ];
 
-  it('終わり方は、この版が作れる 8 通りのいずれかになる', () => {
+  it('終わり方は、この版が作れる 9 通りのいずれかになる', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, moves, stepMin }) =>
         play(state, moves, stepMin).state.tickets.every(
@@ -383,9 +470,9 @@ describe('時刻起因の遷移が守ること', () => {
     );
   });
 
-  it('宣言されている終わり方のうち、まだ作れないのは 2 つだけ', () => {
+  it('宣言されている終わり方のうち、まだ作れないのは 1 つだけ（全席解放・PR 11）', () => {
     const missing = END_REASONS.filter((reason) => !REACHABLE_END_REASONS.includes(reason));
-    expect([...missing].sort()).toEqual(['auto_release', 'venue_closed']);
+    expect([...missing].sort()).toEqual(['venue_closed']);
   });
 
   it('呼び出された人には必ず期限が付いている', () => {
@@ -442,14 +529,25 @@ describe('時刻起因の遷移が守ること', () => {
           .filter((item) => item.state === 'SEATED')
           .every((item) => {
             const seat = settled.tables.find((candidate) => candidate.id === item.tableId);
-            return seat?.status === 'OCCUPIED' && seat.occupantTicketId === item.id;
+            if (seat === undefined || seat.occupantTicketId !== item.id) return false;
+            // 上限を超えた席と、問いかけに答えが無かった席は「確認要」になる
+            // （7.10、7.11 の 2 層目）。結びつきは切れていない。
+            return seat.status === 'OCCUPIED' || seat.status === 'NEEDS_CHECK';
           });
       }),
       RUNS,
     );
   });
 
-  it('保留の期限は、1 回分の上限を超えて置かれない', () => {
+  /**
+   * **正しい上限は「保留に入ってから、使い残している時間まで」である。**
+   *
+   * 以前は「1 回分（`pauseStepMin`）を超えない」と書いていたが、これは誤り
+   * だった。延長は「いまから 1 回分先」なので、保留に入った時刻から測れば
+   * 1 回分を超える。守られているのは合計のほうで、`pauseWindowEnd` が
+   * その頭打ちを作っている（PR 6）。
+   */
+  it('保留の期限は、保留に入った時刻＋使い残しを超えて置かれない', () => {
     fc.assert(
       fc.property(scenarioArb, ({ state, moves, stepMin }) => {
         const settled = play(state, moves, stepMin).state;
@@ -470,5 +568,7 @@ function reachableFromStart(ticket: Ticket): boolean {
 
 function pauseWindowIsBounded(ticket: Ticket, policy: Policy): boolean {
   if (ticket.pauseDeadline === null || ticket.pausedSince === null) return true;
-  return ticket.pauseDeadline - ticket.pausedSince <= minutes(policy.pauseStepMin);
+  const cap: number = minutes(policy.pauseMaxTotalMin);
+  const remaining: number = Math.max(0, cap - ticket.pausedTotal);
+  return ticket.pauseDeadline - ticket.pausedSince <= remaining;
 }

@@ -192,6 +192,67 @@ export interface TableVacated {
   readonly freeAt: Timestamp;
 }
 
+/**
+ * 着席時間の目安に達した（全体プラン 7.10）。
+ *
+ * 「目安時間になりました。次の方のためにご協力をお願いします」を出すための
+ * 合図。**席はまだ動かない。** 猶予（`overstayGraceMin`）を過ぎてから
+ * `TableNeedsCheck` になる。
+ */
+export interface TimeLimitReached {
+  readonly type: 'TimeLimitReached';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+  /** いま何組が待っているか。「現在 3 組がお待ちです」に使う。 */
+  readonly waitingCount: number;
+}
+
+/**
+ * 「まだご利用中ですか」を出した（全体プラン 7.11 の 2 層目）。
+ *
+ * 退席ボタンの押し忘れを拾うための問いかけ。**1 人につき 1 回だけ出す。**
+ * 答えが無いまま `stillHereTimeoutMin` が過ぎると、席は「確認要」になる。
+ */
+export interface StillHereAsked {
+  readonly type: 'StillHereAsked';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+  readonly answerBy: Timestamp;
+}
+
+/** 「まだご利用中ですか」に答えた。 */
+export interface StillHereAnswered {
+  readonly type: 'StillHereAnswered';
+  readonly at: Timestamp;
+  readonly ticketId: TicketId;
+  readonly tableId: TableId;
+}
+
+/** なぜ席が「確認要」になったか。スタッフ画面の並べ方と統計に使う。 */
+export const NEEDS_CHECK_REASONS = ['overstay', 'no_answer', 'unknown_aged'] as const;
+
+export type NeedsCheckReason = (typeof NEEDS_CHECK_REASONS)[number];
+
+/**
+ * 席が「たぶん空いているが確証がない」になった（全体プラン 7.10、7.11）。
+ *
+ * | 理由 | いつ |
+ * |---|---|
+ * | `overstay` | 着席時間の上限と猶予を過ぎた（7.10） |
+ * | `no_answer` | 「まだご利用中ですか」に答えが無かった（7.11 の 2 層目） |
+ * | `unknown_aged` | 無断利用の想定滞在時間が過ぎた（7.11 の 5 層目） |
+ */
+export interface TableNeedsCheck {
+  readonly type: 'TableNeedsCheck';
+  readonly at: Timestamp;
+  readonly tableId: TableId;
+  readonly reason: NeedsCheckReason;
+  /** まだ着席中のチケットが結びついていれば、その ID。 */
+  readonly occupantTicketId: TicketId | null;
+}
+
 /** 人数が変わった（全体プラン 7.6 のエッジケース）。 */
 export interface PartySizeChanged {
   readonly type: 'PartySizeChanged';
@@ -255,6 +316,10 @@ export type DomainEvent =
   | TicketRequeued
   | TicketSwapped
   | TableReportedInUse
+  | TimeLimitReached
+  | StillHereAsked
+  | StillHereAnswered
+  | TableNeedsCheck
   | TicketSeated
   | TableOccupied
   | TableVacated
@@ -281,6 +346,10 @@ export const DOMAIN_EVENT_TYPES = [
   'TicketRequeued',
   'TicketSwapped',
   'TableReportedInUse',
+  'TimeLimitReached',
+  'StillHereAsked',
+  'StillHereAnswered',
+  'TableNeedsCheck',
   'TicketSeated',
   'TableOccupied',
   'TableVacated',

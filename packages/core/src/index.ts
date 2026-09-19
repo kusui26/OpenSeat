@@ -184,6 +184,7 @@ export {
 // ---- 割当の選択（Phase 1 PR 4）----
 
 export type { Assignment, AssignmentReason, CandidatePick } from './allocation/choose.js';
+export type { Suggestion } from './allocation/needs-check.js';
 export {
   ASSIGNMENT_REASONS,
   orderTables,
@@ -193,6 +194,7 @@ export {
   pickCandidate,
   chooseAssignments,
 } from './allocation/choose.js';
+export { suggestNeedsCheck, uncertainTables, guidedTo } from './allocation/needs-check.js';
 
 // ---- コマンドの適用（Phase 1 PR 5）----
 
@@ -215,6 +217,7 @@ export type {
   ReportTakenCommand,
   ReportInUseCommand,
   ConfirmFreeCommand,
+  StillHereCommand,
   ChangePartySizeCommand,
   HeartbeatCommand,
 } from './machine/command.js';
@@ -234,6 +237,7 @@ export type {
   DomainEventType,
   PauseReason,
   RequeueReason,
+  NeedsCheckReason,
   TicketJoined,
   TicketCalled,
   TableHeld,
@@ -251,8 +255,17 @@ export type {
   TicketEnded,
   TableFreed,
   TableDisabled,
+  TimeLimitReached,
+  StillHereAsked,
+  StillHereAnswered,
+  TableNeedsCheck,
 } from './machine/events.js';
-export { DOMAIN_EVENT_TYPES, PAUSE_REASONS, REQUEUE_REASONS } from './machine/events.js';
+export {
+  DOMAIN_EVENT_TYPES,
+  PAUSE_REASONS,
+  REQUEUE_REASONS,
+  NEEDS_CHECK_REASONS,
+} from './machine/events.js';
 
 export type { TicketGuardContext, TableGuardContext } from './machine/guards.js';
 export {
@@ -286,12 +299,24 @@ export {
   maxAgeAt,
   abandonedAt,
   turnoverEndsAt,
+  timeLimitNoticeAt,
+  overstayAt,
+  stillHereAskAt,
+  stillHereTimeoutAt,
+  unknownAgedAt,
+  autoFreeAt,
 } from './machine/deadlines.js';
 
 // ---- 呼び出し・ホールド・ノーショー（Phase 1 PR 6）----
 
 export { runAllocation } from './machine/allocate.js';
-export { clearedHold, clearedHoldDeadline, endedTicket, releaseHeldTable } from './machine/release.js';
+export {
+  clearedHold,
+  clearedHoldDeadline,
+  clearedSeatedNotices,
+  endedTicket,
+  releaseHeldTable,
+} from './machine/release.js';
 export { tick } from './machine/tick.js';
 
 // ---- 座席 QR の分岐（Phase 1 PR 9）----

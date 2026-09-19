@@ -8,8 +8,8 @@
  * `JOIN` は `ticketId` を含み、生成はシミュレータとサーバの責務になる。例外は
  * 表示コードで、状態から決定的に導けるため `core` が採番する。
  *
- * コマンドは PR ごとに増える。この版（PR 9）で **座席 QR が出せる操作がそろった**。
- * 残るのは整合性の回復（PR 10）と運用時間帯（PR 11）。
+ * コマンドは PR ごとに増える。この版（PR 10）で、利用者が出せる操作が
+ * そろった。残るのは運用時間帯の切り替え（PR 11、スタッフと管理者の操作）。
  *
  * 座席 QR を読んだ人に何を見せ、どの操作を出すかは `scan/resolve.ts` が決める
  * （全体プラン 7.8 の分岐表）。
@@ -228,6 +228,17 @@ export interface ConfirmFreeCommand {
   readonly by: Actor;
 }
 
+/**
+ * 「まだご利用中です」（全体プラン 7.11 の 2 層目、7.8 の 5 行目）。
+ *
+ * 問いかけへの答え。**答えたことを記録するだけで、利用は続く。** 席が
+ * すでに「確認要」に落ちていれば、使用中に戻す。
+ */
+export interface StillHereCommand {
+  readonly type: 'STILL_HERE';
+  readonly ticketId: TicketId;
+}
+
 /** 人数の変更（全体プラン 7.6 のエッジケース）。待っている間だけできる。 */
 export interface ChangePartySizeCommand {
   readonly type: 'CHANGE_PARTY_SIZE';
@@ -261,6 +272,7 @@ export type Command =
   | ReportTakenCommand
   | ReportInUseCommand
   | ConfirmFreeCommand
+  | StillHereCommand
   | ChangePartySizeCommand
   | HeartbeatCommand;
 
@@ -287,6 +299,7 @@ export const COMMAND_TYPES = [
   'REPORT_TAKEN',
   'REPORT_IN_USE',
   'CONFIRM_FREE',
+  'STILL_HERE',
   'CHANGE_PARTY_SIZE',
   'HEARTBEAT',
 ] as const satisfies readonly CommandType[];

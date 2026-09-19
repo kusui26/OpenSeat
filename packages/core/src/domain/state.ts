@@ -249,7 +249,9 @@ function sameTicketPresence(a: Ticket, b: Ticket): boolean {
     a.pausedSince === b.pausedSince &&
     a.pausedTotal === b.pausedTotal &&
     a.lastSeenAt === b.lastSeenAt &&
-    a.stillHereAskedAt === b.stillHereAskedAt
+    a.stillHereAskedAt === b.stillHereAskedAt &&
+    a.stillHereAnsweredAt === b.stillHereAnsweredAt &&
+    a.timeLimitNoticedAt === b.timeLimitNoticedAt
   );
 }
 

@@ -21,7 +21,7 @@
  * 一時的に破れる。常時検査の群に混ぜると、正常な状態を違反として弾いてしまう。
  */
 
-import { fitsCapacity, satisfiesTags, type Table } from '../domain/table.js';
+import { fitsCapacity, satisfiesTags, type Table, type TableStatus } from '../domain/table.js';
 import { END_REASON_STATES, isTerminal, type Ticket } from '../domain/ticket.js';
 import { activeTickets, findTable, findTicket, sameVenueState, type VenueState } from '../domain/state.js';
 import { invariant, transitionInvariant, type Invariant, type TransitionInvariant } from '../invariant.js';
@@ -34,12 +34,6 @@ function hasDuplicates(values: readonly string[]): boolean {
 
 function assignedTickets(state: VenueState): readonly Ticket[] {
   return state.tickets.filter((ticket) => ticket.state === 'CALLED' || ticket.state === 'SEATED');
-}
-
-function expectedTableStatus(ticket: Ticket): 'HELD' | 'OCCUPIED' | null {
-  if (ticket.state === 'CALLED') return 'HELD';
-  if (ticket.state === 'SEATED') return 'OCCUPIED';
-  return null;
 }
 
 function tableOf(state: VenueState, ticket: Ticket): Table | undefined {
@@ -122,15 +116,27 @@ export const tableLinkIsMutual: Invariant<VenueState> = invariant(
  * 6. チケットの状態と席の状態が対応する。
  *
  * ID が一致していても、席が `FREE` のままなら別の人に割り当てられてしまう。
+ *
+ * **着席中の席は `OCCUPIED` のほかに `NEEDS_CHECK` も取りうる。** 着席時間の
+ * 上限を超えた席（7.10 の `soft`）と、「まだご利用中ですか」に答えが無かった席
+ * （7.11 の 2 層目）がこれにあたる。どちらも **「その人がまだ居るか分からない」**
+ * という状態で、チケットを終わらせてはいない。終わらせると「まだ居ます」と
+ * 答えて戻る道（`STILL_HERE`）が閉じ、次の人を使用中の席へ案内する事故に
+ * つながる（7.10 が `hard` を勧めない理由と同じ）。
  */
+const SEATED_TABLE_STATUSES: readonly TableStatus[] = ['OCCUPIED', 'NEEDS_CHECK'];
+
 export const assignmentStatusMatches: Invariant<VenueState> = invariant(
   'assignment_status_matches',
-  'CALLED の席は HELD、SEATED の席は OCCUPIED',
-  (state) =>
-    assignedTickets(state).every(
-      (ticket) => tableOf(state, ticket)?.status === expectedTableStatus(ticket),
-    ),
+  'CALLED の席は HELD、SEATED の席は OCCUPIED か NEEDS_CHECK',
+  (state) => assignedTickets(state).every((ticket) => tableMatches(state, ticket)),
 );
+
+function tableMatches(state: VenueState, ticket: Ticket): boolean {
+  const status: TableStatus | undefined = tableOf(state, ticket)?.status;
+  if (status === undefined) return false;
+  return ticket.state === 'CALLED' ? status === 'HELD' : SEATED_TABLE_STATUSES.includes(status);
+}
 
 /**
  * 7. 1 つの席に、席を持つチケットは最大 1 枚（全体プラン 9.12 の 1）。
@@ -194,7 +200,12 @@ export const stateTimestampsAreSet: Invariant<VenueState> = invariant(
 );
 
 function hasRequiredTimestamps(ticket: Ticket): boolean {
-  return hasStateTimestamps(ticket) && pauseStartIsScoped(ticket) && reminderIsScoped(ticket);
+  return (
+    hasStateTimestamps(ticket) &&
+    pauseStartIsScoped(ticket) &&
+    reminderIsScoped(ticket) &&
+    seatedNoticesAreScoped(ticket)
+  );
 }
 
 function hasStateTimestamps(ticket: Ticket): boolean {
@@ -213,6 +224,22 @@ function pauseStartIsScoped(ticket: Ticket): boolean {
 /** ホールドの知らせの記録は `CALLED` のあいだだけ入っている。 */
 function reminderIsScoped(ticket: Ticket): boolean {
   return ticket.state === 'CALLED' || ticket.holdRemindedAt === null;
+}
+
+/**
+ * 着席中の知らせの記録は `SEATED` のあいだだけ入っている。
+ *
+ * 消し忘れると、次に着席したときに問いかけも上限の知らせも出なくなる。
+ * この版ではチケットが着席を 2 回することは無いが、飛び込みと前倒しで
+ * 着席の入口が増えた（PR 9）ので、条件として置いておく。
+ */
+function seatedNoticesAreScoped(ticket: Ticket): boolean {
+  if (ticket.state === 'SEATED') return true;
+  return (
+    ticket.stillHereAskedAt === null &&
+    ticket.stillHereAnsweredAt === null &&
+    ticket.timeLimitNoticedAt === null
+  );
 }
 
 /**

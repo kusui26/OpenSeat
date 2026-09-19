@@ -172,8 +172,25 @@ export interface Ticket {
    */
   readonly hasNotificationChannel: boolean;
 
-  /** 「まだご利用中ですか」を出した時刻。1 回だけ出すための記録。 */
+  /** 「まだご利用中ですか」を出した時刻。1 回だけ出すための記録（全体プラン 7.11 の 2 層目）。 */
   readonly stillHereAskedAt: Timestamp | null;
+
+  /**
+   * その問いかけに答えた時刻。
+   *
+   * 「出した」と「答えた」を分けて持つ。**答えが無いまま
+   * `stillHereTimeoutMin` が過ぎたら、席を「確認要」に落とす**ので、
+   * 出しただけの状態と答えが返った状態を区別できなければならない。
+   */
+  readonly stillHereAnsweredAt: Timestamp | null;
+
+  /**
+   * 「目安時間になりました」を出した時刻（全体プラン 7.10）。
+   *
+   * 上限に達したことを 1 回だけ知らせるための記録。`holdRemindedAt` と同じ形で、
+   * `tick` が数秒ごとに走っても繰り返さないようにする。
+   */
+  readonly timeLimitNoticedAt: Timestamp | null;
 }
 
 /** 呼び出しに関する欄。受付の時点ではまだ何も起きていない。 */
@@ -197,6 +214,8 @@ const UNFINISHED_FIELDS = {
   pausedSince: null,
   pausedTotal: 0,
   stillHereAskedAt: null,
+  stillHereAnsweredAt: null,
+  timeLimitNoticedAt: null,
 } as const;
 
 export interface CreateTicketParams {

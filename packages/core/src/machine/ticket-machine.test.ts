@@ -44,7 +44,8 @@ const DIAGRAM_ARROWS: readonly (readonly [TicketState, TicketState, string])[] =
   ['CALLED', 'WAITING', 'ホールド期限切れ（末尾へ）／席が塞がっていた報告'],
   ['CALLED', 'NO_SHOW', 'ホールド期限切れ（2回目 or cancel）'],
   ['CALLED', 'CANCELLED', '本人キャンセル／スタッフ／施設都合'],
-  ['SEATED', 'DONE', '退席／hard上限の自動解放／全席解放'],
+  ['SEATED', 'DONE', '退席／hard上限の自動解放／確認要のまま自動解放／全席解放'],
+  ['SEATED', 'SEATED', '「まだご利用中ですか」への応答'],
 ];
 
 function arrowsInTable(): ReadonlySet<string> {
@@ -64,8 +65,8 @@ describe('遷移表と全体プラン 7.3 の図の対応', () => {
     expect(extra.map((row) => `${row.from}->${row.to}（${row.on}）`)).toEqual([]);
   });
 
-  it('表は 26 本の遷移を宣言している', () => {
-    expect(TICKET_TRANSITIONS).toHaveLength(26);
+  it('表は 28 本の遷移を宣言している', () => {
+    expect(TICKET_TRANSITIONS).toHaveLength(28);
   });
 });
 
@@ -169,7 +170,7 @@ describe('transit（表に従って遷移する）', () => {
   it('宣言されていない組み合わせの数は、全組み合わせから宣言分を引いた数', () => {
     const total = TICKET_STATES.length * TICKET_EVENTS.length;
     const declared = new Set(TICKET_TRANSITIONS.map((row) => `${row.from}/${row.on}`)).size;
-    expect(total).toBe(8 * 17);
+    expect(total).toBe(8 * 19);
     expect(declared).toBeLessThan(total);
   });
 

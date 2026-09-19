@@ -132,6 +132,8 @@ export interface Sitter {
   readonly stay: DurationMs;
   /** 座席 QR を読むか。読まなければゴーストになる。 */
   readonly scans: boolean;
+  /** 退席を申告するか。登録した人と同じ率で引く。 */
+  readonly reportsCheckout: boolean;
 }
 
 /**
@@ -155,5 +157,6 @@ export function createSitter(
     partySize,
     stay: Math.round(logNormal(rng, stayMedian(scenario, partySize), scenario.stay.sigma)),
     scans: bernoulli(rng, scenario.walkInShare),
+    reportsCheckout: bernoulli(rng, scenario.checkoutReportRate),
   };
 }
