@@ -65,8 +65,8 @@ describe('遷移表と全体プラン 7.3 の図の対応', () => {
     expect(extra.map((row) => `${row.from}->${row.to}（${row.on}）`)).toEqual([]);
   });
 
-  it('表は 28 本の遷移を宣言している', () => {
-    expect(TICKET_TRANSITIONS).toHaveLength(28);
+  it('表は 30 本の遷移を宣言している', () => {
+    expect(TICKET_TRANSITIONS).toHaveLength(30);
   });
 });
 
@@ -170,7 +170,7 @@ describe('transit（表に従って遷移する）', () => {
   it('宣言されていない組み合わせの数は、全組み合わせから宣言分を引いた数', () => {
     const total = TICKET_STATES.length * TICKET_EVENTS.length;
     const declared = new Set(TICKET_TRANSITIONS.map((row) => `${row.from}/${row.on}`)).size;
-    expect(total).toBe(8 * 19);
+    expect(total).toBe(8 * 20);
     expect(declared).toBeLessThan(total);
   });
 

@@ -257,6 +257,19 @@ export const endReasonMatchesState: Invariant<VenueState> = invariant(
       .every((ticket) => ticket.endReason !== null && END_REASON_STATES[ticket.endReason] === ticket.state),
 );
 
+/**
+ * 12. 受付を開いているなら、運用している（全体プラン 7.14）。
+ *
+ * 逆は成り立たない。運用終了の手前では、**運用しながら受付だけを閉じている**
+ * （`join_cutoff_before_close_min`）。この向きだけを条件にしてあるのは、
+ * 「運用していないのに受付だけ開いている」が意味を持たないためである。
+ */
+export const joinRequiresOperating: Invariant<VenueState> = invariant(
+  'join_requires_operating',
+  '受付を開いているなら運用している',
+  (state) => !state.joinOpen || state.operating,
+);
+
 /** すべてのコマンド適用と `tick` の出口で検査する不変条件。 */
 export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   uniqueIds,
@@ -270,12 +283,13 @@ export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   heldTableHasDeadline,
   stateTimestampsAreSet,
   endReasonMatchesState,
+  joinRequiresOperating,
 ];
 
 // ---- 割当の直後にだけ成り立つ不変条件 ----
 
 /**
- * 12. 収まる空席があるのに、待っている人が残らない（全体プラン 9.12 の 3）。
+ * 13. 収まる空席があるのに、待っている人が残らない（全体プラン 9.12 の 3）。
  *
  * **割当の直後にしか成立しない。** 席が解放された瞬間や、呼び出しの途中では
  * 一時的に破れる。常時検査の群に混ぜてはならない。
@@ -298,7 +312,7 @@ export const POST_ALLOCATION_INVARIANTS: readonly Invariant<VenueState>[] = [noS
 // ---- 遷移の前後について成り立つ不変条件 ----
 
 /**
- * 13. 保留の出入りで順番が変わらない（全体プラン 9.12 の 4）。
+ * 14. 保留の出入りで順番が変わらない（全体プラン 9.12 の 4）。
  *
  * 「パス」や 1 回目のノーショーで保留に落ちても、順番は保持される（7.7）。
  * これが破れると、譲った人が損をするので誰も譲らなくなる。
@@ -319,7 +333,7 @@ export const priorityPreservedAcrossPause: TransitionInvariant<VenueState> = tra
 );
 
 /**
- * 14. 同じ時刻の `tick` は状態を変えない（全体プラン 9.12 の 5）。
+ * 15. 同じ時刻の `tick` は状態を変えない（全体プラン 9.12 の 5）。
  *
  * 呼び出し側が同じ時刻で `tick` を 2 回呼び、その 2 つの状態を渡して検査する。
  * 冪等でないと、`tick` の間隔が変わっただけで結果が変わってしまい、

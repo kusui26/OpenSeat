@@ -3,7 +3,8 @@
  *
  * 手順は 3 つ。
  *
- * 1. **席の期限を明かす。** 片付けの猶予が過ぎた席を空席に戻す
+ * 1. **席の期限を明かす。** 片付けの猶予が過ぎた席を空席に戻し、運用から
+ *    外れる席を外す
  * 2. **割当を実行する。** 空席と待ちが噛み合っていれば呼び出す
  * 3. **不変条件を検査する。** 破れていたら変更を破棄して拒否する
  *
@@ -47,11 +48,11 @@ const MAX_CHAIN = 8;
 /**
  * 席に起きること。
  *
- * 片付けの猶予が明けること（7.6）と、整合性の回復の 5 層目（7.11）。
- * 着席中の席が「確認要」に落ちるのは、利用者の操作と競合するのでチケット側
- * （`tick.ts`）が見る。
+ * 片付けの猶予が明けること（7.6）、整合性の回復の 5 層目（7.11）、運用から
+ * 外れること（7.6 のエッジケースと 7.14）。着席中の席が「確認要」に落ちるのは、
+ * 利用者の操作と競合するのでチケット側（`tick.ts`）が見る。
  */
-type TableDueKind = 'TURNOVER_DONE' | 'UNKNOWN_AGED' | 'AUTO_FREE';
+type TableDueKind = 'TURNOVER_DONE' | 'UNKNOWN_AGED' | 'AUTO_FREE' | 'LEAVES_SERVICE';
 
 interface TableDue {
   readonly kind: TableDueKind;
@@ -70,6 +71,7 @@ function tableDeadlinesOf(state: VenueState, table: Table): readonly TableDue[] 
     ['TURNOVER_DONE', turnoverEndsAt(table, state.policy)],
     ['UNKNOWN_AGED', unknownAgedAt(table, state.policy)],
     ['AUTO_FREE', autoFreeAt(table, state.policy)],
+    ['LEAVES_SERVICE', leavesServiceAt(state, table)],
   ];
   return candidates
     .filter((entry): entry is readonly [TableDueKind, Timestamp] => entry[1] !== null)
@@ -191,6 +193,52 @@ export function reclaimSeat(state: VenueState, ticketId: TicketId | null, now: T
   });
 }
 
+/**
+ * 空席が運用から外れる時刻（全体プラン 7.6 のエッジケース、7.14）。
+ *
+ * 理由は 2 つあり、どちらも **「利用が終わって空いた瞬間」が期限** である。
+ *
+ * | 理由 | いつ | 管理対象（`enabled`） |
+ * |---|---|---|
+ * | 対象外にする予約がある（7.6） | 管理者が外した席の利用が終わった | 落とす |
+ * | 運用していない（7.14） | 運用終了のときに使われていた席が空いた | **そのまま** |
+ *
+ * 2 つを分けているのは、**運用時間外と「対象席でない」は別のこと**だからである。
+ * 閉店で外れた席は次の `OPEN` で戻るが、管理者が外した席は戻らない。
+ *
+ * **すでに空いている席には、ここは効かない。** 「外す」と決めた時点で空席だった
+ * 席は、その瞬間に外れる（`apply.ts` の `DISABLE_TABLE`、`venue.ts` の
+ * `closeVenue`）。ここが拾うのは、そのとき使われていた席だけである。だから
+ * `statusSince`（空いた時刻）が、そのまま外れる時刻になる。
+ */
+function leavesServiceAt(state: VenueState, table: Table): Timestamp | null {
+  if (table.status !== 'FREE') return null;
+  if (!table.disableAfterCurrent && state.operating) return null;
+  return table.statusSince;
+}
+
+/**
+ * 空席を運用から外す。
+ *
+ * 出口（ここ）と、外すと決めた瞬間（`apply.ts`）から呼ばれる。
+ */
+export function leaveService(state: VenueState, table: Table, now: Timestamp): Outcome {
+  const moved = tableTransition({ state, table, now }, 'CLOSE');
+  if (!moved.ok) return err(moved.error);
+  const excluded: Table = {
+    ...table,
+    status: moved.value,
+    statusSince: now,
+    // 対象外の予約があったときだけ、管理対象から本当に外す。
+    enabled: table.disableAfterCurrent ? false : table.enabled,
+    disableAfterCurrent: false,
+  };
+  return ok({
+    state: withTable(state, excluded),
+    events: [{ type: 'TableDisabled', at: now, tableId: table.id }],
+  });
+}
+
 function settleTableDue(state: VenueState, table: Table, due: TableDue, now: Timestamp): Outcome {
   switch (due.kind) {
     case 'TURNOVER_DONE':
@@ -199,6 +247,8 @@ function settleTableDue(state: VenueState, table: Table, due: TableDue, now: Tim
       return ageUnknown(state, table, now);
     case 'AUTO_FREE':
       return autoFree(state, table, now);
+    case 'LEAVES_SERVICE':
+      return leaveService(state, table, now);
   }
 }
 

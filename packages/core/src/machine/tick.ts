@@ -33,9 +33,13 @@ import { err, ok, type Result } from '../result.js';
 import { hasPassed, minutes, type Timestamp } from '../time.js';
 import { pausedDraft } from './apply.js';
 import { settle, type Draft, type Outcome } from './settle.js';
+import { closeVenue, endForClose } from './venue.js';
 import {
   abandonedAt,
   holdExpiresAt,
+  joinCutoffAt,
+  venueCloseAt,
+  venueClosesAt,
   holdReminderAt,
   maxAgeAt,
   overstayAt,
@@ -57,6 +61,10 @@ import { tableTransition, ticketTransition } from './transition.js';
  * 遷移表の事象に対応する。
  */
 const DUE_KINDS = [
+  // **運用終了を先頭に置く。** 同じ時刻に自分の期限（保留の上限など）と運用終了が
+  // 重なったら、施設都合のほうを採る。取り消し（`CANCELLED`）は期限切れ
+  // （`EXPIRED`）より説明がやさしく、利用者に厳しくしない側だからである。
+  'VENUE_CLOSE',
   'REMIND',
   'HOLD_EXPIRE',
   'PAUSE_EXPIRE',
@@ -85,6 +93,7 @@ interface Due {
 function deadlinesOf(state: VenueState, ticket: Ticket): readonly Due[] {
   const policy = state.policy;
   const candidates: readonly (readonly [DueKind, Timestamp | null])[] = [
+    ['VENUE_CLOSE', venueCloseAt(ticket, state)],
     ['REMIND', holdReminderAt(ticket, policy)],
     ['HOLD_EXPIRE', holdExpiresAt(ticket)],
     ['PAUSE_EXPIRE', pauseExpiresAt(ticket)],
@@ -360,6 +369,8 @@ function unlinkTable(state: VenueState, tableId: string | null): VenueState {
 // eslint-disable-next-line max-lines-per-function
 function settleDue(state: VenueState, ticket: Ticket, due: Due, now: Timestamp): Outcome {
   switch (due.kind) {
+    case 'VENUE_CLOSE':
+      return endForClose(state, ticket, now);
     case 'REMIND':
       return remind(state, ticket, now);
     case 'HOLD_EXPIRE':
@@ -379,6 +390,46 @@ function settleDue(state: VenueState, ticket: Ticket, due: Due, now: Timestamp):
     case 'OVERSTAY':
       return markNeedsCheck(state, ticket, 'OVERSTAY', 'overstay', now);
   }
+}
+
+// ---- 施設そのものの期限（全体プラン 7.14） ----
+
+/**
+ * 受付の締切と運用終了を処理する。
+ *
+ * **チケットを一巡したあとに見る。** 待っている人の取り消しは、施設の側では
+ * なく **1 枚ごとの期限**（`VENUE_CLOSE`）として処理してある。こうしないと、
+ * 運用終了より早いホールドの期限が後回しになり、`tick` の刻み方で結果が
+ * 変わってしまう（このファイル冒頭の「期限は早いものから」）。ここに残るのは
+ * 施設の欄と席の後始末だけで、待っている人はもう居ない。
+ */
+function settleVenue(state: VenueState, now: Timestamp): Outcome {
+  const cutoff = closeJoinIfDue(state, now);
+  if (!cutoff.ok) return err(cutoff.error);
+
+  const closed = closeIfDue(cutoff.value.state, now);
+  if (!closed.ok) return err(closed.error);
+  return ok({
+    state: closed.value.state,
+    events: [...cutoff.value.events, ...closed.value.events],
+  });
+}
+
+/** 運用終了の手前で、新規の受付だけを止める（`join_cutoff_before_close_min`）。 */
+function closeJoinIfDue(state: VenueState, now: Timestamp): Outcome {
+  const at: Timestamp | null = joinCutoffAt(state);
+  if (at === null || state.closesAt === null || !hasPassed(at, now)) return ok({ state, events: [] });
+  return ok({
+    state: { ...state, joinOpen: false },
+    events: [{ type: 'JoinClosed', at, closesAt: state.closesAt }],
+  });
+}
+
+/** 運用時間が終わった。手で閉じるときとまったく同じ手続きを踏む。 */
+function closeIfDue(state: VenueState, now: Timestamp): Outcome {
+  const at: Timestamp | null = venueClosesAt(state);
+  if (at === null || !hasPassed(at, now)) return ok({ state, events: [] });
+  return closeVenue(state, at, 'schedule');
 }
 
 // ---- 全体 ----
@@ -438,7 +489,11 @@ export function tick(
     events.push(...settled.value.events);
   }
 
+  // 施設の開閉は、チケットを一巡したあとで見る（下記）。
+  const venue = settleVenue(current, now);
+  if (!venue.ok) return err(venue.error);
+
   // 席の期限（片付けの猶予）は出口の `settle` が見る。`apply` でも同じように
   // 明かす必要があるため、`tick` だけの仕事にはしていない。
-  return settle({ state: current, events }, now);
+  return settle({ state: venue.value.state, events: [...events, ...venue.value.events] }, now);
 }

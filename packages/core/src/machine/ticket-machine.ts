@@ -17,6 +17,11 @@ import type { Transition } from './transit.js';
  *
  * 利用者やスタッフの操作（`CANCEL`、`CHECK_IN`）と、時刻が来たことで起きるもの
  * （`HOLD_EXPIRE`、`MAX_AGE`）の両方を含む。後者は `tick` が発火させる。
+ *
+ * **`CLOSE`（運用終了）と `VENUE_RELEASE`（全席解放）は別の事象である**（7.4）。
+ * 運用終了は待っている人だけを取り消し、**席を確保した人と着席中の人はそのまま
+ * 残す**（利用中の席は現在の利用が終わってから外れる）。全席解放は緊急の操作で、
+ * 着席中の人まで含めてすべてを終わらせる。
  */
 export const TICKET_EVENTS = [
   'CALL',
@@ -37,6 +42,7 @@ export const TICKET_EVENTS = [
   'AUTO_RELEASE',
   'SEAT_RECLAIMED',
   'STILL_HERE',
+  'CLOSE',
   'VENUE_RELEASE',
 ] as const;
 
@@ -132,6 +138,14 @@ export const TICKET_TRANSITIONS = [
   },
   {
     from: 'WAITING',
+    on: 'CLOSE',
+    to: 'CANCELLED',
+    guard: null,
+    source: '7.14',
+    note: '運用時間が終わった。待っている人は施設都合で取り消す',
+  },
+  {
+    from: 'WAITING',
     on: 'VENUE_RELEASE',
     to: 'CANCELLED',
     guard: null,
@@ -179,6 +193,14 @@ export const TICKET_TRANSITIONS = [
     guard: null,
     source: '7.9',
     note: '本人またはスタッフが取り消した',
+  },
+  {
+    from: 'PAUSED',
+    on: 'CLOSE',
+    to: 'CANCELLED',
+    guard: null,
+    source: '7.14',
+    note: '運用時間が終わった。保留中の人も施設都合で取り消す',
   },
   {
     from: 'PAUSED',
@@ -340,6 +362,19 @@ export const TICKET_TRANSITIONS = [
  * 幽霊チケットにはならない。
  */
 export const MAX_AGE_APPLIES_TO: readonly TicketState[] = ['WAITING', 'PAUSED'];
+
+/**
+ * 運用終了で施設都合の取り消しを受ける状態（全体プラン 7.14）。
+ *
+ * **待っている人だけ。** 7.14 は「終了時刻に残った `WAITING`/`PAUSED` は施設都合で
+ * キャンセル、`SEATED` は `DISABLED` になっても座り続けて問題ない」と書いている。
+ * `CALLED` に触れていないが、7.4 が「利用中の席（`HELD` を含む）は現在の利用が
+ * 終わってから外す」としているので、**確保した席に向かっている人も締め出さない**。
+ * 到着して座れば普通に利用が終わり、来なければホールドの期限で片づく。
+ *
+ * 緊急の全席解放（`VENUE_RELEASE`）はこれとは別で、着席中の人まで対象にする。
+ */
+export const VENUE_CLOSE_APPLIES_TO: readonly TicketState[] = ['WAITING', 'PAUSED'];
 
 // ---- 状態を変えないコマンドの適用範囲 ----
 //

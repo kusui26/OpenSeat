@@ -43,7 +43,8 @@ import type { TableId, TicketCode, TicketId } from '../domain/ids.js';
 import { err, ok, type Result } from '../result.js';
 import { minutes, type Timestamp } from '../time.js';
 import type { Decision } from '../decision.js';
-import { reclaimSeat, settle, type Draft, type Outcome } from './settle.js';
+import { leaveService, reclaimSeat, settle, type Draft, type Outcome } from './settle.js';
+import { closeVenue, openVenue, releaseAll } from './venue.js';
 import {
   CANCEL_END_REASONS,
   CHECKOUT_END_REASONS,
@@ -53,7 +54,12 @@ import {
   type CheckInCommand,
   type CheckInEarlyCommand,
   type CheckOutCommand,
+  type CloseCommand,
   type ConfirmFreeCommand,
+  type DisableTableCommand,
+  type EnableTableCommand,
+  type OpenCommand,
+  type ReleaseAllCommand,
   type ReportInUseCommand,
   type ReportTakenCommand,
   type StillHereCommand,
@@ -846,6 +852,73 @@ function handleHeartbeat(state: VenueState, command: HeartbeatCommand, now: Time
   return ok({ state: withTicket(state, { ...ticket, lastSeenAt: now }), events: [] });
 }
 
+// ---- 施設の開閉（全体プラン 7.14、7.9） ----
+
+/**
+ * 運用を始める（7.14）。
+ *
+ * スケジュールによる開始も、スタッフの手動 ON も同じコマンドで表す。**どちらを
+ * 優先するかは呼ぶ側の判断**で、7.14 の「スタッフの手動 ON/OFF を優先させる」は
+ * 境界側のスケジューラが手動の指示を上書きしない、という形で実現する。
+ */
+function handleOpen(state: VenueState, command: OpenCommand, now: Timestamp): Outcome {
+  return openVenue(state, command.closesAt, now);
+}
+
+/** 運用を終える（7.14）。時間で終わる場合は `tick` が同じ手続きを踏む。 */
+function handleClose(state: VenueState, _command: CloseCommand, now: Timestamp): Outcome {
+  return closeVenue(state, now, 'manual');
+}
+
+/** 全席解放（7.9、12.6）。**運用していなくても通る。** */
+function handleReleaseAll(state: VenueState, _command: ReleaseAllCommand, now: Timestamp): Outcome {
+  return releaseAll(state, now);
+}
+
+// ---- 席の設定変更（全体プラン 7.6 のエッジケース） ----
+
+/**
+ * 席を対象から外す。
+ *
+ * **空席ならその場で外れる。使われている席は利用が終わってから外れる**
+ * （`disableAfterCurrent`）。呼び出し中の人を追い出さないための順序である。
+ *
+ * 空席をその場で外すのは、時刻を正しく刻むためでもある。出口（`settle`）に
+ * 任せると「空いた時刻」で外れてしまい、**外すと決めるより前の時刻**が
+ * イベントに載る。
+ */
+function handleDisableTable(state: VenueState, command: DisableTableCommand, now: Timestamp): Outcome {
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const reserved: Table = { ...table, disableAfterCurrent: true };
+  if (reserved.status !== 'FREE') return ok({ state: withTable(state, reserved), events: [] });
+  return leaveService(withTable(state, reserved), reserved, now);
+}
+
+/**
+ * 席を対象に戻す。
+ *
+ * 外れるのを待っている予約も取り消す。運用中なら、その場で空席として使える
+ * ようになる。**外す操作と対にしてある**（片道だけ用意すると、誤って外した席を
+ * 戻す手段が無くなる）。
+ */
+function handleEnableTable(state: VenueState, command: EnableTableCommand, now: Timestamp): Outcome {
+  const table: Table | undefined = findTable(state, command.tableId);
+  if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  const managed: Table = { ...table, enabled: true, disableAfterCurrent: false };
+  if (!state.operating || managed.status !== 'DISABLED') {
+    return ok({ state: withTable(state, managed), events: [] });
+  }
+  const moved = tableTransition({ state, table: managed, now }, 'OPEN');
+  if (!moved.ok) return err(moved.error);
+  return ok({
+    state: withTable(state, { ...managed, status: moved.value, statusSince: now }),
+    events: [{ type: 'TableFreed', at: now, tableId: table.id, releasedTicketId: null }],
+  });
+}
+
 // ---- 入口 ----
 
 /**
@@ -875,6 +948,11 @@ function route(state: VenueState, command: Command, now: Timestamp): Outcome {
     case 'STILL_HERE': return handleStillHere(state, command, now);
     case 'CHANGE_PARTY_SIZE': return handleChangePartySize(state, command, now);
     case 'HEARTBEAT': return handleHeartbeat(state, command, now);
+    case 'OPEN': return handleOpen(state, command, now);
+    case 'CLOSE': return handleClose(state, command, now);
+    case 'RELEASE_ALL': return handleReleaseAll(state, command, now);
+    case 'DISABLE_TABLE': return handleDisableTable(state, command, now);
+    case 'ENABLE_TABLE': return handleEnableTable(state, command, now);
   }
 }
 

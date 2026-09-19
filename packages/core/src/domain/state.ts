@@ -13,6 +13,7 @@ import type { Policy } from './policy.js';
 import type { Table } from './table.js';
 import type { TableId, TicketCode, TicketId, VenueId } from './ids.js';
 import type { Ticket, TicketState } from './ticket.js';
+import type { Timestamp } from '../time.js';
 import { isActive } from './ticket.js';
 
 export interface VenueState {
@@ -40,6 +41,20 @@ export interface VenueState {
    */
   readonly joinOpen: boolean;
 
+  /**
+   * いまの営業回が終わる時刻（全体プラン 7.14）。運用終了を持たないなら `null`。
+   *
+   * **曜日と時間帯の設定（`managed_schedule`）はここに持たない。** 施設の
+   * タイムゾーンでの評価は境界側の責務で（9.4）、core が受け取るのは解決済みの
+   * 絶対時刻 1 つだけである。こうしてあるので、**運用終了がホールドの期限や
+   * 保留の期限とまったく同じ仕組みで処理できる**（`machine/deadlines.ts`）。
+   *
+   * 運用が終わったあとも消さない。終了後に呼び出しが流れて待ちに戻る人
+   * （ノーショーの繰り上げなど）を、次の `tick` で拾うためである。次の `OPEN`
+   * で置き換わる。
+   */
+  readonly closesAt: Timestamp | null;
+
   /** 表示コードの採番カウンタ。0 から始まる。 */
   readonly nextCodeSeq: number;
 }
@@ -59,6 +74,7 @@ export function createVenueState(params: CreateVenueStateParams): VenueState {
     policy: params.policy,
     operating: false,
     joinOpen: false,
+    closesAt: null,
     nextCodeSeq: 0,
   };
 }
@@ -292,6 +308,7 @@ export function sameVenueState(a: VenueState, b: VenueState): boolean {
     a.venueId === b.venueId &&
     a.operating === b.operating &&
     a.joinOpen === b.joinOpen &&
+    a.closesAt === b.closesAt &&
     a.nextCodeSeq === b.nextCodeSeq &&
     a.policy === b.policy &&
     a.tables.length === b.tables.length &&

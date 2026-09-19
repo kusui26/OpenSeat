@@ -128,23 +128,30 @@ function tablesOf(specs: readonly TableSpec[], now: Timestamp): readonly Table[]
           tags: spec.tags ?? [],
           adminRank: group,
         }),
-        status: 'FREE' as const,
       };
     }),
   );
 }
 
-/** シナリオから、運用が始まった状態を作る。 */
+/**
+ * シナリオから、運用が始まった状態を作る。
+ *
+ * **`OPEN` コマンドを通す。** 状態を直に組み立てると、運用開始の手続き
+ * （席が自由席から戻る、終了時刻を覚える）をシミュレータが二重に持つことになる。
+ * `closesAfter` を持つシナリオでは、ここで渡した終了時刻が期限になり、
+ * あとは時計が進むだけで 7.14 の運用終了が再現される。
+ */
 export function openVenue(scenario: Scenario, now: Timestamp = SIM_EPOCH): VenueState {
-  return {
-    ...createVenueState({
-      venueId: scenario.name,
-      policy: scenario.policy,
-      tables: tablesOf(scenario.tables, now),
-    }),
-    operating: true,
-    joinOpen: true,
-  };
+  const closed: VenueState = createVenueState({
+    venueId: scenario.name,
+    policy: scenario.policy,
+    tables: tablesOf(scenario.tables, now),
+  });
+  const closesAt: Timestamp | null =
+    scenario.closesAfter === null ? null : now + scenario.closesAfter;
+  const opened = apply(closed, { type: 'OPEN', closesAt, by: 'staff' }, now);
+  if (!opened.ok) throw new Error(`運用を開始できない: ${opened.error.describe}`);
+  return opened.value.state;
 }
 
 // ---- 予定表 ----
@@ -377,17 +384,19 @@ class World {
     );
     if (table === undefined) return;
 
+    // **コマンドを送る前に覚える。** `WALK_IN` は同じ手のうちに `TicketSeated` を
+    // 出し、その反応（`onSeated`）が「この人は誰か」を聞きに来る。あとで覚えると
+    // 間に合わず、退席の申告も、実際に立ち上がる時刻も記録されない。
+    this.seated.push(sitter);
     if (sitter.scans) {
       this.send(
         { type: 'WALK_IN', ticketId: sitter.ticketId, tableId: table.id, partySize: sitter.partySize },
         now,
       );
-      this.seated.push(sitter);
       return;
     }
     // 読まない人。システムからは空席のまま、実際には使われている。
     this.ghosts.set(table.id, now + sitter.stay);
-    this.seated.push(sitter);
   }
 
   /** 見えないまま使われていた席から人が去る。席の記録はそのまま残る。 */

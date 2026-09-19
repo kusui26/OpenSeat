@@ -21,6 +21,7 @@ import {
   seatCount,
   shareOfVenue,
   withCheckoutReportRate,
+  withClosing,
   withPolicy,
   type Scenario,
 } from './scenario.js';
@@ -182,6 +183,15 @@ describe('シナリオの組み立て', () => {
     expect(WEEKEND_OVERLOAD.tables).toBe(TABLES_26);
     expect(WEEKEND_OVERLOAD.arrivals).toBe(WEEKEND_ARRIVALS);
   });
+
+  /**
+   * **運用終了は既定で持たない。** 8.1 のシナリオはピークを切り出したもので、
+   * その先に閉店があるかどうかは書かれていない。入れると終了時刻に残った人が
+   * 施設都合で取り消され、待ち時間や回転率の見え方が変わる。
+   */
+  it.each(all)('$name は運用終了を持たない', (scenario) => {
+    expect(scenario.closesAfter).toBeNull();
+  });
 });
 
 describe('差し替え（8.2 の比較で使う）', () => {
@@ -193,6 +203,12 @@ describe('差し替え（8.2 の比較で使う）', () => {
 
   it('退席の申告率を差し替えられる', () => {
     expect(withCheckoutReportRate(WEEKEND_PEAK, 1).checkoutReportRate).toBe(1);
+  });
+
+  it('運用時間を持たせられる（7.14）', () => {
+    const closing = withClosing(WEEKEND_PEAK, minutes(90));
+    expect(closing.closesAfter).toBe(minutes(90));
+    expect(closing.arrivals).toBe(WEEKEND_PEAK.arrivals);
   });
 
   it('差し替えても元のシナリオは変わらない', () => {
