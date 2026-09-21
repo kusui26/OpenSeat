@@ -50,6 +50,7 @@
 | 層 | 選定 |
 |---|---|
 | ドメインロジック | `packages/core`。純粋関数、依存ゼロ。サーバとシミュレータとテストで共有 |
+| API の契約 | `packages/shared`。Zod の宣言から型と [OpenAPI](docs/openapi.json) を導く。文言もここ |
 | サーバ | Hono on Node、SQLite（Drizzle ORM）、WebSocket |
 | フロントエンド | React + Vite の PWA。利用者・ボード・スタッフ・管理を 1 つに |
 | 配布 | 単一 Docker イメージ。Litestream で継続バックアップ |

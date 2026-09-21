@@ -1151,15 +1151,18 @@ erDiagram
 |---|---|---|
 | 利用者 | `POST /api/v/{venue}/tickets` | 受付（人数・タグ・通知手段） |
 | 利用者 | `GET /api/t/{ticket}?k=` | チケット状態 |
-| 利用者 | `POST /api/t/{ticket}/actions` | `cancel / pause / ready / extend / pass / checkin{tableToken or code} / checkout / still_here / report_conflict / change_party_size` |
+| 利用者 | `POST /api/t/{ticket}/actions` | `cancel / pause / ready / extend / pass / check_in / check_in_early / swap_table / check_out / still_here / report_conflict / change_party_size / heartbeat` |
 | 利用者 | `GET /api/v/{venue}/tables/{token}` | 座席 QR ランディングの文脈（7.8 の分岐に必要な情報） |
 | 利用者 | `POST /api/v/{venue}/tables/{token}/walk-in` | 飛び込み着席 |
+| 利用者 | `POST /api/v/{venue}/tables/{token}/report` | この席は使用中／空いていた、という報告（7.8 の 9 行目、7.11 の 3 層目）。**チケットを持たない人も出せる** |
 | 利用者 | `GET /api/v/{venue}/status` | 空き状況・目安 |
 | ボード | `GET /api/v/{venue}/board` + WS | 呼び出し中一覧 |
 | スタッフ | `POST /api/staff/v/{venue}/...` | 手動受付、席の状態変更、キャンセル、モード切替、全席解放 |
 | 管理 | `GET/PUT /api/admin/v/{venue}/layout`、`/settings`、`/print/*.pdf`、`/reports/*` | 設定・印刷・レポート |
 
-API スキーマは `packages/shared` の zod 定義から生成し、OpenAPI も出力する（外部連携・将来のセンサー入力用）。
+**この表は概略です。** 実装の出典は `packages/shared/src/api/catalog.ts` で、この 9 行を具体的な 17 本に開いてあります。対応と、9.7 に無いものを足した理由はそこに宣言してあり、テストが突き合わせています。
+
+API スキーマは `packages/shared` の zod 定義から生成し、OpenAPI も出力します（外部連携・将来のセンサー入力用）。生成物は [`docs/openapi.json`](openapi.json) にあり、`pnpm openapi` で更新します。
 
 ### 9.8 識別と認証
 

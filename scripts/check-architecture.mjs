@@ -57,6 +57,23 @@ const FORBIDDEN_OUTSIDE_SIM_ENTRY = [
 /** シミュレータの入口。ここだけが `process` と `node:fs` に触ってよい。 */
 const SIM_ENTRY = join('packages', 'core', 'sim', 'main.ts');
 
+/**
+ * `packages/shared` で使ってはならない記述。
+ *
+ * **ここは画面（`apps/web`）もサーバも読む層である。** ブラウザに Node の組み込みは
+ * 無いので、1 つでも混ざると画面が動かない。契約と文言しか置かない層なので、
+ * そもそも要らないはずである。
+ */
+const FORBIDDEN_IN_SHARED = [
+  { pattern: /from\s+['"]node:/, reason: 'shared は画面からも読む。Node の組み込みに依存しない' },
+  { pattern: /\bprocess\s*\./, reason: 'shared は環境変数を読まない（境界側の責務）' },
+  { pattern: /\bfetch\s*\(/, reason: 'shared は I/O を行わない。契約と文言だけを置く' },
+  { pattern: /\bconsole\s*\./, reason: '出力は境界側の責務' },
+];
+
+/** `packages/shared` が持ってよい依存。**増やすときは理由を PR に書くこと。** */
+const ALLOWED_SHARED_DEPENDENCIES = ['zod', '@openseat/core'];
+
 /** ルート層から直接触ってはならないもの。ドメインへの委譲を迂回させない。 */
 const FORBIDDEN_IN_ROUTES = [
   { pattern: /from\s+['"][^'"]*\/db\//, reason: 'ルートから永続化層を直接呼ばない（CLAUDE.md 3.1）' },
@@ -188,6 +205,33 @@ const ROUTE_DIRECTORIES = [
   join('apps', 'server', 'src', 'routes'),
 ];
 
+/** `packages/shared` が画面でも動くことを確かめる。 */
+async function checkSharedRunsAnywhere() {
+  const files = await collectSources(join(ROOT, 'packages', 'shared', 'src'));
+  const problems = [];
+  for (const file of files.filter((candidate) => !isTest(candidate))) {
+    problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_SHARED));
+  }
+  return problems;
+}
+
+/** `packages/shared` の依存が、許したものだけであることを確かめる。 */
+async function checkSharedDependencies() {
+  const manifest = await readManifest(join(ROOT, 'packages', 'shared', 'package.json'));
+  if (manifest === null) return [];
+  const names = Object.keys(manifest.dependencies ?? {});
+  const extra = names.filter((name) => !ALLOWED_SHARED_DEPENDENCIES.includes(name));
+  if (extra.length === 0) return [];
+  return [
+    {
+      file: 'packages/shared/package.json',
+      line: 0,
+      reason: `shared の依存は ${ALLOWED_SHARED_DEPENDENCIES.join(' と ')} だけにする。${extra.join(', ')} がある`,
+      text: 'dependencies',
+    },
+  ];
+}
+
 async function checkRouteBoundaries() {
   const problems = [];
   for (const directory of ROUTE_DIRECTORIES) {
@@ -219,6 +263,8 @@ async function main() {
   failures += report('packages/core が純粋である（時刻・乱数・環境・I/O を持たない）', await checkCorePurity());
   failures += report('packages/core/sim が再現可能である（種から導く乱数と仮想時刻だけ）', await checkSimIsReproducible());
   failures += report('packages/core/sim の読み書きが sim/main.ts に閉じている', await checkSimIoStaysAtEntry());
+  failures += report('packages/shared が画面でも動く（Node の組み込みに触らない）', await checkSharedRunsAnywhere());
+  failures += report('packages/shared の依存が最小である', await checkSharedDependencies());
   failures += report('ルート層が永続化層を直接呼んでいない', await checkRouteBoundaries());
 
   if (failures > 0) {

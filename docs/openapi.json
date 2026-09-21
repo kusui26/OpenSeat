@@ -1,0 +1,4137 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "OpenSeat API",
+    "version": "0.0.0",
+    "description": "フードコートの座席順番待ち。アプリ不要・アカウント不要で、入力は人数だけ。",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "tags": [
+    {
+      "name": "user",
+      "description": "利用者"
+    },
+    {
+      "name": "board",
+      "description": "入口ボード"
+    },
+    {
+      "name": "staff",
+      "description": "スタッフ"
+    },
+    {
+      "name": "admin",
+      "description": "管理者"
+    }
+  ],
+  "paths": {
+    "/api/v/{venue}/tickets": {
+      "post": {
+        "operationId": "join",
+        "summary": "順番待ちに登録する",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "x-openseat-client",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partySize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  },
+                  "requiredTags": {
+                    "default": [],
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    }
+                  }
+                },
+                "required": [
+                  "partySize"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "順番待ちに登録する",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "minLength": 16,
+                      "maxLength": 128,
+                      "description": "チケット URL の秘密パラメータ。保存も転送もしないこと"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket",
+                    "secret"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / PARTY_SIZE_INVALID / PARTY_TOO_LARGE / PARTY_TOO_SMALL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "JOIN_CLOSED / NO_CODE_AVAILABLE / QUEUE_FULL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/t/{ticket}": {
+      "get": {
+        "operationId": "readTicket",
+        "summary": "チケットの状態を見る",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "ticket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "チケットの状態を見る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    },
+                    "eta": {
+                      "$ref": "#/components/schemas/WaitEstimate"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket",
+                    "eta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "TICKET_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/t/{ticket}/actions": {
+      "post": {
+        "operationId": "ticketAction",
+        "summary": "本人の操作を送る",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "ticket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "cancel"
+                      },
+                      "reason": {
+                        "default": null,
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "found_seat",
+                              "leaving",
+                              "too_long",
+                              "other"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "pause"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "ready"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "extend"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "pass"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "check_in"
+                      },
+                      "tableToken": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "tableToken"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "check_in_early"
+                      },
+                      "tableToken": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "tableToken"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "swap_table"
+                      },
+                      "tableToken": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "tableToken"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "check_out"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "still_here"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "report_conflict"
+                      },
+                      "tableToken": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "tableToken"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "change_party_size"
+                      },
+                      "partySize": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 99
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "partySize"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "heartbeat"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "本人の操作を送る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    },
+                    "eta": {
+                      "$ref": "#/components/schemas/WaitEstimate"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket",
+                    "eta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / PARTY_SIZE_INVALID / PARTY_TOO_LARGE / PARTY_TOO_SMALL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "STAFF_ONLY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "TABLE_NOT_FOUND / TICKET_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v/{venue}/tables/{token}": {
+      "get": {
+        "operationId": "readTable",
+        "summary": "座席 QR を読んだ人に見せるもの",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "座席 QR を読んだ人に見せるもの",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "check_in",
+                        "swap_offer",
+                        "other_table",
+                        "early_check_in",
+                        "keep_waiting",
+                        "resume_first",
+                        "seated_here",
+                        "seated_elsewhere",
+                        "walk_in_offer",
+                        "queue_first",
+                        "held_for_other",
+                        "in_use",
+                        "needs_check",
+                        "turnover",
+                        "not_managed"
+                      ]
+                    },
+                    "table": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "tags": {
+                          "maxItems": 8,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "DISABLED",
+                            "FREE",
+                            "HELD",
+                            "OCCUPIED",
+                            "OCCUPIED_UNKNOWN",
+                            "TURNOVER",
+                            "NEEDS_CHECK"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "capacity",
+                        "tags",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "assignedTableLabel": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "actions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "JOIN",
+                          "CANCEL",
+                          "PAUSE",
+                          "READY",
+                          "EXTEND",
+                          "PASS",
+                          "CHECK_IN",
+                          "CHECK_OUT",
+                          "SWAP_TABLE",
+                          "CHECK_IN_EARLY",
+                          "WALK_IN",
+                          "REPORT_TAKEN",
+                          "REPORT_IN_USE",
+                          "CONFIRM_FREE",
+                          "STILL_HERE",
+                          "CHANGE_PARTY_SIZE",
+                          "HEARTBEAT",
+                          "OPEN",
+                          "CLOSE",
+                          "RELEASE_ALL",
+                          "DISABLE_TABLE",
+                          "ENABLE_TABLE"
+                        ]
+                      }
+                    },
+                    "staleTicket": {
+                      "type": "boolean"
+                    },
+                    "ticket": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/TicketView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "eta": {
+                      "$ref": "#/components/schemas/WaitEstimate"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "kind",
+                    "table",
+                    "assignedTableLabel",
+                    "actions",
+                    "staleTicket",
+                    "ticket",
+                    "eta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND / TABLE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v/{venue}/tables/{token}/walk-in": {
+      "post": {
+        "operationId": "walkIn",
+        "summary": "待たずに空席へ座る",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "x-openseat-client",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partySize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  }
+                },
+                "required": [
+                  "partySize"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "待たずに空席へ座る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "minLength": 16,
+                      "maxLength": 128,
+                      "description": "チケット URL の秘密パラメータ。保存も転送もしないこと"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket",
+                    "secret"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / PARTY_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND / TABLE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE / NO_CODE_AVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v/{venue}/tables/{token}/report": {
+      "post": {
+        "operationId": "reportTable",
+        "summary": "この席は使用中／空いていた、と伝える",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "report": {
+                    "type": "string",
+                    "enum": [
+                      "in_use",
+                      "free"
+                    ]
+                  },
+                  "ticket": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "report"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "この席は使用中／空いていた、と伝える",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "table": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "DISABLED",
+                            "FREE",
+                            "HELD",
+                            "OCCUPIED",
+                            "OCCUPIED_UNKNOWN",
+                            "TURNOVER",
+                            "NEEDS_CHECK"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "table"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "STAFF_ONLY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND / TABLE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v/{venue}/status": {
+      "get": {
+        "operationId": "venueStatus",
+        "summary": "登録せずに、いまの混み具合を見る",
+        "tags": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "partySize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 99
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "登録せずに、いまの混み具合を見る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "venue": {
+                      "type": "object",
+                      "properties": {
+                        "slug": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "timezone": {
+                          "type": "string"
+                        },
+                        "operating": {
+                          "type": "boolean"
+                        },
+                        "joinOpen": {
+                          "type": "boolean"
+                        },
+                        "closesAt": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "slug",
+                        "name",
+                        "timezone",
+                        "operating",
+                        "joinOpen",
+                        "closesAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "waiting": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "freeTables": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "managedTables": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "estimates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          "eta": {
+                            "$ref": "#/components/schemas/WaitEstimate"
+                          }
+                        },
+                        "required": [
+                          "partySize",
+                          "eta"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "longWaitConfirmMin": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "venue",
+                    "waiting",
+                    "freeTables",
+                    "managedTables",
+                    "estimates",
+                    "longWaitConfirmMin"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v/{venue}/board": {
+      "get": {
+        "operationId": "board",
+        "summary": "呼び出しボードの中身",
+        "tags": [
+          "board"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "呼び出しボードの中身",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "venue": {
+                      "type": "object",
+                      "properties": {
+                        "slug": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "operating": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "slug",
+                        "name",
+                        "operating"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "called": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BoardEntry"
+                      }
+                    },
+                    "waiting": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "estimates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          "eta": {
+                            "$ref": "#/components/schemas/WaitEstimate"
+                          }
+                        },
+                        "required": [
+                          "partySize",
+                          "eta"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TableView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "venue",
+                    "called",
+                    "waiting",
+                    "estimates",
+                    "tables"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff/v/{venue}/console": {
+      "get": {
+        "operationId": "console",
+        "summary": "運用コンソールの中身",
+        "tags": [
+          "staff"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "運用コンソールの中身",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "venue": {
+                      "type": "object",
+                      "properties": {
+                        "slug": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "operating": {
+                          "type": "boolean"
+                        },
+                        "joinOpen": {
+                          "type": "boolean"
+                        },
+                        "closesAt": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "slug",
+                        "name",
+                        "operating",
+                        "joinOpen",
+                        "closesAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "queue": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QueueEntry"
+                      }
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TableView"
+                      }
+                    },
+                    "needsCheck": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16
+                          },
+                          "since": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "hasOccupantRecord": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "since",
+                          "hasOccupantRecord"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "estimates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          "eta": {
+                            "$ref": "#/components/schemas/WaitEstimate"
+                          }
+                        },
+                        "required": [
+                          "partySize",
+                          "eta"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "venue",
+                    "queue",
+                    "tables",
+                    "needsCheck",
+                    "estimates"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff/v/{venue}/tickets": {
+      "post": {
+        "operationId": "manualJoin",
+        "summary": "スマホを持たない人を代わりに登録する",
+        "tags": [
+          "staff"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partySize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  },
+                  "requiredTags": {
+                    "default": [],
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    }
+                  }
+                },
+                "required": [
+                  "partySize"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "スマホを持たない人を代わりに登録する",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / PARTY_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / JOIN_CLOSED / NOT_ALLOWED_IN_STATE / NO_CODE_AVAILABLE / QUEUE_FULL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff/v/{venue}/tickets/{ticket}/actions": {
+      "post": {
+        "operationId": "staffTicketAction",
+        "summary": "スタッフが代わりに操作する",
+        "tags": [
+          "staff"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "cancel"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "found_seat",
+                          "leaving",
+                          "too_long",
+                          "other"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "reason"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "check_in"
+                      },
+                      "tableLabel": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "tableLabel"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "check_out"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "スタッフが代わりに操作する",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ticket": {
+                      "$ref": "#/components/schemas/TicketView"
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "ticket"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / REASON_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND / TABLE_NOT_FOUND / TICKET_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff/v/{venue}/tables/{label}/actions": {
+      "post": {
+        "operationId": "staffTableAction",
+        "summary": "席の状態を人の手で動かす",
+        "tags": [
+          "staff"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "free",
+                      "in_use",
+                      "disable",
+                      "enable"
+                    ]
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "席の状態を人の手で動かす",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "table": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "DISABLED",
+                            "FREE",
+                            "HELD",
+                            "OCCUPIED",
+                            "OCCUPIED_UNKNOWN",
+                            "TURNOVER",
+                            "NEEDS_CHECK"
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "status",
+                        "enabled"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "table"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN / STAFF_ONLY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND / TABLE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff/v/{venue}/operation": {
+      "post": {
+        "operationId": "operation",
+        "summary": "運用を開始・終了し、全席を解放する",
+        "tags": [
+          "staff"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "open"
+                      },
+                      "closesAt": {
+                        "default": null,
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "close"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "release_all"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "運用を開始・終了し、全席を解放する",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "operating": {
+                      "type": "boolean"
+                    },
+                    "joinOpen": {
+                      "type": "boolean"
+                    },
+                    "closesAt": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TableView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "operating",
+                    "joinOpen",
+                    "closesAt",
+                    "tables"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD / NOT_ALLOWED_IN_STATE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v/{venue}/settings": {
+      "get": {
+        "operationId": "readSettings",
+        "summary": "運用設定を見る",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "運用設定を見る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "maxPartySize": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 99
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxQueueLength": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "joinRateLimitPerHour": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "joinCutoffBeforeCloseMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "longWaitConfirmMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "fairnessOverrideMin": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "string",
+                              "const": "Infinity"
+                            }
+                          ]
+                        },
+                        "tableOrder": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "capacity_asc",
+                              "verified_free_desc",
+                              "admin_rank",
+                              "label"
+                            ]
+                          }
+                        },
+                        "allowTableSwap": {
+                          "type": "boolean"
+                        },
+                        "turnoverMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "holdMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "holdReminderBeforeMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "holdExtensionMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "maxExtensions": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "noShowPolicy": {
+                          "type": "string",
+                          "enum": [
+                            "cancel",
+                            "requeue_once",
+                            "requeue_back"
+                          ]
+                        },
+                        "pauseStepMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "pauseMaxTotalMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "ticketMaxAgeMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "abandonTimeoutMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "timeLimitMode": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "soft",
+                            "hard"
+                          ]
+                        },
+                        "timeLimitMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "limitOnlyWhenWaiting": {
+                          "type": "boolean"
+                        },
+                        "overstayGraceMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "stillHerePromptMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "stillHereTimeoutMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "assignNeedsCheck": {
+                          "type": "boolean"
+                        },
+                        "unknownOccupancyToCheckMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "needsCheckAutoFreeMin": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "assumedStayMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "etaBucketMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "maxPartySize",
+                        "maxQueueLength",
+                        "joinRateLimitPerHour",
+                        "joinCutoffBeforeCloseMin",
+                        "longWaitConfirmMin",
+                        "fairnessOverrideMin",
+                        "tableOrder",
+                        "allowTableSwap",
+                        "turnoverMin",
+                        "holdMin",
+                        "holdReminderBeforeMin",
+                        "holdExtensionMin",
+                        "maxExtensions",
+                        "noShowPolicy",
+                        "pauseStepMin",
+                        "pauseMaxTotalMin",
+                        "ticketMaxAgeMin",
+                        "abandonTimeoutMin",
+                        "timeLimitMode",
+                        "timeLimitMin",
+                        "limitOnlyWhenWaiting",
+                        "overstayGraceMin",
+                        "stillHerePromptMin",
+                        "stillHereTimeoutMin",
+                        "assignNeedsCheck",
+                        "unknownOccupancyToCheckMin",
+                        "needsCheckAutoFreeMin",
+                        "assumedStayMin",
+                        "etaBucketMin"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "publishedAt": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "preset": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "settings",
+                    "version",
+                    "publishedAt",
+                    "preset"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateSettings",
+        "summary": "運用設定を公開する",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "maxPartySize": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "maxQueueLength": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "joinRateLimitPerHour": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "joinCutoffBeforeCloseMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "longWaitConfirmMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fairnessOverrideMin": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "string",
+                            "const": "Infinity"
+                          }
+                        ]
+                      },
+                      "tableOrder": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "capacity_asc",
+                            "verified_free_desc",
+                            "admin_rank",
+                            "label"
+                          ]
+                        }
+                      },
+                      "allowTableSwap": {
+                        "type": "boolean"
+                      },
+                      "turnoverMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "holdMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "holdReminderBeforeMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "holdExtensionMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "maxExtensions": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "noShowPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "cancel",
+                          "requeue_once",
+                          "requeue_back"
+                        ]
+                      },
+                      "pauseStepMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "pauseMaxTotalMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "ticketMaxAgeMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "abandonTimeoutMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "timeLimitMode": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "soft",
+                          "hard"
+                        ]
+                      },
+                      "timeLimitMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "limitOnlyWhenWaiting": {
+                        "type": "boolean"
+                      },
+                      "overstayGraceMin": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "stillHerePromptMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "stillHereTimeoutMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "assignNeedsCheck": {
+                        "type": "boolean"
+                      },
+                      "unknownOccupancyToCheckMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "needsCheckAutoFreeMin": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "assumedStayMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "etaBucketMin": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "maxPartySize",
+                      "maxQueueLength",
+                      "joinRateLimitPerHour",
+                      "joinCutoffBeforeCloseMin",
+                      "longWaitConfirmMin",
+                      "fairnessOverrideMin",
+                      "tableOrder",
+                      "allowTableSwap",
+                      "turnoverMin",
+                      "holdMin",
+                      "holdReminderBeforeMin",
+                      "holdExtensionMin",
+                      "maxExtensions",
+                      "noShowPolicy",
+                      "pauseStepMin",
+                      "pauseMaxTotalMin",
+                      "ticketMaxAgeMin",
+                      "abandonTimeoutMin",
+                      "timeLimitMode",
+                      "timeLimitMin",
+                      "limitOnlyWhenWaiting",
+                      "overstayGraceMin",
+                      "stillHerePromptMin",
+                      "stillHereTimeoutMin",
+                      "assignNeedsCheck",
+                      "unknownOccupancyToCheckMin",
+                      "needsCheckAutoFreeMin",
+                      "assumedStayMin",
+                      "etaBucketMin"
+                    ]
+                  },
+                  "preset": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "settings"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "運用設定を公開する",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "maxPartySize": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 99
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxQueueLength": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "joinRateLimitPerHour": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "joinCutoffBeforeCloseMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "longWaitConfirmMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "fairnessOverrideMin": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "string",
+                              "const": "Infinity"
+                            }
+                          ]
+                        },
+                        "tableOrder": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "capacity_asc",
+                              "verified_free_desc",
+                              "admin_rank",
+                              "label"
+                            ]
+                          }
+                        },
+                        "allowTableSwap": {
+                          "type": "boolean"
+                        },
+                        "turnoverMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "holdMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "holdReminderBeforeMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "holdExtensionMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "maxExtensions": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "noShowPolicy": {
+                          "type": "string",
+                          "enum": [
+                            "cancel",
+                            "requeue_once",
+                            "requeue_back"
+                          ]
+                        },
+                        "pauseStepMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "pauseMaxTotalMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "ticketMaxAgeMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "abandonTimeoutMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "timeLimitMode": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "soft",
+                            "hard"
+                          ]
+                        },
+                        "timeLimitMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "limitOnlyWhenWaiting": {
+                          "type": "boolean"
+                        },
+                        "overstayGraceMin": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "stillHerePromptMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "stillHereTimeoutMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "assignNeedsCheck": {
+                          "type": "boolean"
+                        },
+                        "unknownOccupancyToCheckMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "needsCheckAutoFreeMin": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "assumedStayMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "etaBucketMin": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "maxPartySize",
+                        "maxQueueLength",
+                        "joinRateLimitPerHour",
+                        "joinCutoffBeforeCloseMin",
+                        "longWaitConfirmMin",
+                        "fairnessOverrideMin",
+                        "tableOrder",
+                        "allowTableSwap",
+                        "turnoverMin",
+                        "holdMin",
+                        "holdReminderBeforeMin",
+                        "holdExtensionMin",
+                        "maxExtensions",
+                        "noShowPolicy",
+                        "pauseStepMin",
+                        "pauseMaxTotalMin",
+                        "ticketMaxAgeMin",
+                        "abandonTimeoutMin",
+                        "timeLimitMode",
+                        "timeLimitMin",
+                        "limitOnlyWhenWaiting",
+                        "overstayGraceMin",
+                        "stillHerePromptMin",
+                        "stillHereTimeoutMin",
+                        "assignNeedsCheck",
+                        "unknownOccupancyToCheckMin",
+                        "needsCheckAutoFreeMin",
+                        "assumedStayMin",
+                        "etaBucketMin"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "publishedAt": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "preset": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "settings",
+                    "version",
+                    "publishedAt",
+                    "preset"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v/{venue}/tables": {
+      "get": {
+        "operationId": "readTables",
+        "summary": "席の一覧を見る",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "席の一覧を見る",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          "tags": {
+                            "default": [],
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 32
+                            }
+                          },
+                          "adminRank": {
+                            "default": 0,
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "enabled": {
+                            "default": true,
+                            "type": "boolean"
+                          },
+                          "inUse": {
+                            "type": "boolean"
+                          },
+                          "disableAfterCurrent": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "capacity",
+                          "tags",
+                          "adminRank",
+                          "enabled",
+                          "inUse",
+                          "disableAfterCurrent"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "tables"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateTables",
+        "summary": "席の一覧を差し替える",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tables": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 99
+                        },
+                        "tags": {
+                          "default": [],
+                          "maxItems": 8,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          }
+                        },
+                        "adminRank": {
+                          "default": 0,
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "enabled": {
+                          "default": true,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "capacity"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "tables"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "席の一覧を差し替える",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverNow": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 99
+                          },
+                          "tags": {
+                            "default": [],
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 32
+                            }
+                          },
+                          "adminRank": {
+                            "default": 0,
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "enabled": {
+                            "default": true,
+                            "type": "boolean"
+                          },
+                          "inUse": {
+                            "type": "boolean"
+                          },
+                          "disableAfterCurrent": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "capacity",
+                          "tags",
+                          "adminRank",
+                          "enabled",
+                          "inUse",
+                          "disableAfterCurrent"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "serverNow",
+                    "tables"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BLOCKED_BY_GUARD",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BoardEntry": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z]-\\d{2}$"
+          },
+          "tableLabel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "holdDeadline": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "calledAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "code",
+          "tableLabel",
+          "holdDeadline",
+          "calledAt"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "TICKET_NOT_FOUND",
+              "TABLE_NOT_FOUND",
+              "TICKET_ALREADY_EXISTS",
+              "PARTY_SIZE_INVALID",
+              "PARTY_TOO_SMALL",
+              "PARTY_TOO_LARGE",
+              "QUEUE_FULL",
+              "JOIN_CLOSED",
+              "NOT_ALLOWED_IN_STATE",
+              "BLOCKED_BY_GUARD",
+              "GUARD_NOT_IMPLEMENTED",
+              "REASON_REQUIRED",
+              "STAFF_ONLY",
+              "NO_CODE_AVAILABLE",
+              "CLOCK_WENT_BACKWARD",
+              "INVARIANT_VIOLATED",
+              "INVALID_REQUEST",
+              "UNAUTHORIZED",
+              "FORBIDDEN",
+              "NOT_FOUND",
+              "RATE_LIMITED",
+              "INTERNAL"
+            ],
+            "description": "機械が分岐する識別子"
+          },
+          "message": {
+            "type": "string",
+            "description": "利用者に見せる一文。施設のロケールで作られる"
+          },
+          "retryAfterSec": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryAfterSec"
+        ],
+        "additionalProperties": false
+      },
+      "QueueEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z]-\\d{2}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "WAITING",
+              "PAUSED",
+              "CALLED",
+              "SEATED",
+              "DONE",
+              "CANCELLED",
+              "NO_SHOW",
+              "EXPIRED"
+            ]
+          },
+          "partySize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          },
+          "requiredTags": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          },
+          "priorityAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "tableLabel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holdDeadline": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hasNotificationChannel": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "state",
+          "partySize",
+          "requiredTags",
+          "priorityAt",
+          "createdAt",
+          "tableLabel",
+          "holdDeadline",
+          "hasNotificationChannel"
+        ],
+        "additionalProperties": false
+      },
+      "TableView": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "tags": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DISABLED",
+              "FREE",
+              "HELD",
+              "OCCUPIED",
+              "OCCUPIED_UNKNOWN",
+              "TURNOVER",
+              "NEEDS_CHECK"
+            ]
+          },
+          "calledCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "capacity",
+          "tags",
+          "status",
+          "calledCode"
+        ],
+        "additionalProperties": false
+      },
+      "TicketView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z]-\\d{2}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "WAITING",
+              "PAUSED",
+              "CALLED",
+              "SEATED",
+              "DONE",
+              "CANCELLED",
+              "NO_SHOW",
+              "EXPIRED"
+            ]
+          },
+          "partySize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          },
+          "requiredTags": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          },
+          "tableLabel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holdDeadline": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pauseDeadline": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "extensionsLeft": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "eta": {
+            "$ref": "#/components/schemas/WaitEstimate"
+          },
+          "timeLimit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "checked_out",
+                  "staff_checkout",
+                  "auto_release",
+                  "user_cancel",
+                  "staff_cancel",
+                  "venue_closed",
+                  "no_show",
+                  "abandoned",
+                  "pause_expired",
+                  "max_age"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "JOIN",
+                "CANCEL",
+                "PAUSE",
+                "READY",
+                "EXTEND",
+                "PASS",
+                "CHECK_IN",
+                "CHECK_OUT",
+                "SWAP_TABLE",
+                "CHECK_IN_EARLY",
+                "WALK_IN",
+                "REPORT_TAKEN",
+                "REPORT_IN_USE",
+                "CONFIRM_FREE",
+                "STILL_HERE",
+                "CHANGE_PARTY_SIZE",
+                "HEARTBEAT",
+                "OPEN",
+                "CLOSE",
+                "RELEASE_ALL",
+                "DISABLE_TABLE",
+                "ENABLE_TABLE"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "state",
+          "partySize",
+          "requiredTags",
+          "tableLabel",
+          "holdDeadline",
+          "pauseDeadline",
+          "extensionsLeft",
+          "eta",
+          "timeLimit",
+          "endReason",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "TimeLimit": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "minutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reached": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "at",
+          "minutes",
+          "reached"
+        ],
+        "additionalProperties": false
+      },
+      "WaitEstimate": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "no_seat"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false,
+            "description": "その人数が収まる席が 1 つも無い"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "not_waiting"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false,
+            "description": "並んでいない"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "estimate"
+              },
+              "minutes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "目安の分数（悲観側に切り上げ）"
+              },
+              "fromMin": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "表示する幅の下限"
+              },
+              "toMin": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "表示する幅の上限"
+              },
+              "ahead": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "前に何組いるか"
+              }
+            },
+            "required": [
+              "kind",
+              "minutes",
+              "fromMin",
+              "toMin",
+              "ahead"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  }
+}
