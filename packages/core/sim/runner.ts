@@ -51,6 +51,7 @@ import {
   apply,
   createTable,
   createVenueState,
+  estimateForJoin,
   findTicket,
   isDefect,
   minutes,
@@ -58,7 +59,14 @@ import {
   suggestNeedsCheck,
   tick,
 } from '../src/index.js';
-import { createParty, createSitter, decidesNoShow, type Party, type Sitter } from './agent.js';
+import {
+  createParty,
+  createSitter,
+  decidesNoShow,
+  decidesToBalk,
+  type Party,
+  type Sitter,
+} from './agent.js';
 import { arrivalTimes } from './distributions.js';
 import { streamFor } from './rng.js';
 import type { Scenario, TableSpec } from './scenario.js';
@@ -98,6 +106,10 @@ export interface RunResult {
   readonly ticks: number;
   /** 実装の誤りを示す拒否。**空でなければ失敗である。** */
   readonly defects: readonly Rejection[];
+  /** 受付の前に出した目安（7.13）。予測と実績の差を測るのに使う。 */
+  readonly estimates: readonly WaitSample[];
+  /** 目安を見て登録をやめた人（7.5 の 5）。 */
+  readonly balked: readonly string[];
   /**
    * コマンドを投入した時刻を、投入した順に並べたもの。
    *
@@ -108,6 +120,18 @@ export interface RunResult {
   readonly appliedAt: readonly Timestamp[];
   /** 最後に進めた仮想時刻。 */
   readonly endedAt: Timestamp;
+}
+
+/**
+ * 受付の前に出した目安（7.13）と、その時刻。
+ *
+ * **予測と実績の差を測るのに使う。** 実績（呼び出しまでの時間）はイベントから
+ * 読めるので、ここには予測だけを残す。登録をやめた人のぶんも残してある。
+ */
+export interface WaitSample {
+  readonly ticketId: string;
+  readonly at: Timestamp;
+  readonly minutes: number;
 }
 
 /** 予定されている行動。 */
@@ -288,6 +312,10 @@ class World {
   private visits: readonly Visit[] = [];
   /** 一度見に行った（人、席）の組。同じ席を何度も往復させない。 */
   private readonly checked = new Set<string>();
+  /** 受付の前に出した目安（7.13）。 */
+  private readonly estimates: WaitSample[] = [];
+  /** 目安を見て登録をやめた人（7.5 の 5）。 */
+  private readonly balked: string[] = [];
 
   constructor(
     private readonly scenario: Scenario,
@@ -302,6 +330,7 @@ class World {
   /** 1 刻み進める。予定されている行動を出してから、時計を進める。 */
   step(now: Timestamp): void {
     for (const item of this.schedule.take(now)) {
+      if (this.declines(item.command, item.at)) continue;
       this.send(item.command, item.at);
     }
     this.releaseGhosts(now);
@@ -409,6 +438,31 @@ class World {
     for (const [tableId, until] of [...this.ghosts]) {
       if (until <= now) this.ghosts.delete(tableId);
     }
+  }
+
+  /**
+   * 受付の前に目安を見せ、長ければ引き返してもらう（7.5 の 5、7.13）。
+   *
+   * **目安は登録する前に出す。** 自分を数に入れない見積もりになり、画面に出る
+   * 数字とそのまま一致する。やめた人のぶんも記録は残す（何人が引き返したかは、
+   * 目安の出し方を変えたときに効いてくる）。
+   */
+  private declines(command: Command, at: Timestamp): boolean {
+    if (command.type !== 'JOIN') return false;
+    const party = this.partyOf(command.ticketId);
+    if (party === undefined) return false;
+
+    const seen = estimateForJoin(
+      this.state,
+      { partySize: command.partySize, requiredTags: command.requiredTags },
+      at,
+    );
+    if (seen.kind !== 'estimate') return false;
+
+    this.estimates.push({ ticketId: command.ticketId, at, minutes: seen.minutes });
+    if (!decidesToBalk(party, seen.minutes, this.scenario)) return false;
+    this.balked.push(command.ticketId);
+    return true;
   }
 
   private send(command: Command, at: Timestamp): void {
@@ -549,6 +603,8 @@ class World {
       commands: this.appliedAt.length,
       ticks: this.ticks,
       defects: this.defects,
+      estimates: this.estimates,
+      balked: this.balked,
       appliedAt: this.appliedAt,
       endedAt,
     };

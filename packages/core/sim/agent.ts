@@ -62,6 +62,15 @@ export interface Party {
    */
   readonly reportsCheckout: boolean;
   /**
+   * 登録をやめる目（7.5 の 5）。0 以上 1 未満。
+   *
+   * 受付の前に出る目安（7.13）が `long_wait_confirm_min` を超えたとき、この目と
+   * `balkShare` を比べて決める。**目だけを先に引いておく**のはノーショーと同じ
+   * 理由で、目安は到着してみるまで分からないためである。
+   */
+  readonly balkRoll: number;
+
+  /**
    * 画面を開いたままにせず、通知で受け取るか。
    *
    * **常に真にしてある。** 偽にすると放置の判定（7.9）が働き、心拍を出さない
@@ -97,12 +106,38 @@ export function createParty(
     ticketId: `p${String(index).padStart(4, '0')}`,
     arriveAt,
     partySize,
+    ...drawTraits(rng, scenario, partySize),
+  };
+}
+
+/** その組の振る舞いを決める性質。**足すときは末尾に足すこと**（順序が中身を決める）。 */
+type PartyTraits = Pick<
+  Party,
+  'stay' | 'walk' | 'noShowRoll' | 'reportsCheckout' | 'balkRoll' | 'hasNotificationChannel'
+>;
+
+function drawTraits(rng: Rng, scenario: Scenario, partySize: number): PartyTraits {
+  return {
     stay: Math.round(logNormal(rng, stayMedian(scenario, partySize), scenario.stay.sigma)),
     walk: Math.round(drawWalk(rng, scenario)),
     noShowRoll: rng.next(),
     reportsCheckout: bernoulli(rng, scenario.checkoutReportRate),
+    balkRoll: rng.next(),
     hasNotificationChannel: true,
   };
+}
+
+/**
+ * 目安を見て、登録をやめるか（7.5 の 5）。
+ *
+ * 7.5 は「現在 40 分以上お待ちいただく見込みです。登録しますか？」を出すと
+ * している。**やめる割合は 8.1 に無い**ので、シナリオの値（初期値 0.5）を使う。
+ * 現地観察でも測れないため、実証実験の登録率から逆算することになる。
+ *
+ * **先に引いておいた目と比べるだけ**なので、ここで乱数は引かない。
+ */
+export function decidesToBalk(party: Party, estimateMin: number, scenario: Scenario): boolean {
+  return estimateMin > scenario.policy.longWaitConfirmMin && party.balkRoll < scenario.balkShare;
 }
 
 /** 呼び出しから着席までの時間。中央値と p90 から σ を導く（8.1）。 */

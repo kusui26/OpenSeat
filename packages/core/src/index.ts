@@ -366,3 +366,8 @@ export { tick } from './machine/tick.js';
 
 export type { TableScanKind, TableScanOutcome } from './scan/resolve.js';
 export { TABLE_SCAN_KINDS, resolveTableScan } from './scan/resolve.js';
+
+// ---- 待ち時間の推定（Phase 1 PR 13）----
+
+export type { WaitEstimate, PartyToSeat } from './eta.js';
+export { estimateForJoin, estimateForTicket } from './eta.js';
