@@ -96,3 +96,17 @@ jobs:
           fi
           echo "検査は違反を正しく検知した。"
           rm packages/core/sim/__ci_violation.ts
+
+      - name: シミュレータの読み書きが入口の外に出たことを検知できることを確かめる
+        run: |
+          cat > packages/core/sim/__ci_violation.ts <<'EOF2'
+          export function writes(): void {
+            console.log(process.argv);
+          }
+          EOF2
+          if node scripts/check-architecture.mjs; then
+            echo "::error::検査が違反を見逃した。scripts/check-architecture.mjs を確認すること。"
+            exit 1
+          fi
+          echo "検査は違反を正しく検知した。"
+          rm packages/core/sim/__ci_violation.ts

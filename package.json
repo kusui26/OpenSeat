@@ -16,9 +16,10 @@
   "packageManager": "pnpm@11.10.0",
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json",
+    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json && tsc -p packages/core/tsconfig.sim.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "sim": "tsc -p packages/core/tsconfig.sim.json && node packages/core/dist-sim/sim/main.js",
     "check:arch": "node scripts/check-architecture.mjs",
     "check:links": "node scripts/check-doc-links.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:arch && pnpm check:links",

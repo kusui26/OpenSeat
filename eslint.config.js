@@ -21,7 +21,7 @@ const NODE_GLOBALS = {
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '**/*.tsbuildinfo'],
+    ignores: ['**/dist/**', '**/dist-sim/**', '**/coverage/**', '**/node_modules/**', '**/*.tsbuildinfo'],
   },
 
   // ---- TypeScript（型情報つき） ----
@@ -110,6 +110,31 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         { selector: "NewExpression[callee.name='Date']", message: 'シミュレータは仮想時刻だけを使う' },
+      ],
+    },
+  },
+
+  // ---- シミュレータの I/O は入口 1 つに閉じる ----
+  // 引数を読む・ファイルに書く・画面に出すのは `sim/main.ts` だけ。ほかは
+  // すべて純粋な関数にしておく（CLAUDE.md 4 章「副作用は境界に集める」）。
+  // ここを開けると、指標の計算の途中で読み書きが混ざり、テストできなくなる。
+  {
+    files: ['packages/core/sim/**/*.ts'],
+    ignores: ['packages/core/sim/main.ts', 'packages/core/sim/**/*.test.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { name: 'process', message: '引数と環境を読むのは sim/main.ts だけ' },
+        { name: 'fetch', message: 'シミュレータは I/O を行わない' },
+        { name: 'console', message: '画面に出すのは sim/main.ts だけ' },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['node:*'], message: 'Node の組み込みに触るのは sim/main.ts だけ' },
+          ],
+        },
       ],
     },
   },

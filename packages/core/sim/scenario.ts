@@ -310,6 +310,23 @@ export const WEEKEND_OVERLOAD: Scenario = {
   arrivals: WEEKEND_ARRIVALS,
 };
 
+/**
+ * 選べるシナリオの名前。**型をここから導く。**
+ *
+ * 一覧が先にあると、`SCENARIOS` に載せ忘れた名前も、名前を付けずに足した
+ * シナリオも型で落ちる。CLI の案内文と、シナリオを総なめするテストが、
+ * この並びをそのまま使う。
+ */
+export const SCENARIO_NAMES = [
+  'weekday-lunch',
+  'weekend-peak',
+  'weekend-peak-50',
+  'weekend-peak-100',
+  'weekend-overload',
+] as const;
+
+export type ScenarioName = (typeof SCENARIO_NAMES)[number];
+
 /** 名前で引けるようにしたシナリオの一覧。CLI（PR 14）が使う。 */
 export const SCENARIOS = {
   'weekday-lunch': WEEKDAY_LUNCH,
@@ -317,9 +334,7 @@ export const SCENARIOS = {
   'weekend-peak-50': WEEKEND_PEAK_50,
   'weekend-peak-100': WEEKEND_PEAK_100,
   'weekend-overload': WEEKEND_OVERLOAD,
-} as const satisfies Readonly<Record<string, Scenario>>;
-
-export type ScenarioName = keyof typeof SCENARIOS;
+} as const satisfies Readonly<Record<ScenarioName, Scenario>>;
 
 /** 設定を差し替えたシナリオを作る。方針の比較（8.2）で使う。 */
 export function withPolicy(base: Scenario, policy: Policy): Scenario {
