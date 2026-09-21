@@ -78,6 +78,16 @@ export const TICK_INTERVAL = seconds(10);
 /** 仮想の開始時刻。実時刻との対応には意味が無いので、読みやすい定数を置く。 */
 export const SIM_EPOCH: Timestamp = 1_700_000_000_000;
 
+/**
+ * 1 刻みのあいだに、予定を取り出す回数の上限。
+ *
+ * 出した行動が同じ刻みの中に次の行動を呼ぶので、空になるまで繰り返す
+ * （`dispatchDue`）。1 回の往復で必ず誰かが 1 歩進むため実際には数回で尽きるが、
+ * 止まらない形を作らないように上限を置く。**ここに達したら、残りは次の刻みへ
+ * 回り、時刻が巻き戻ってコアに弾かれる**（`defects` に出る）。
+ */
+const MAX_DISPATCH_ROUNDS = 100;
+
 export interface RunOptions {
   readonly scenario: Scenario;
   readonly seed: number;
@@ -329,15 +339,34 @@ class World {
 
   /** 1 刻み進める。予定されている行動を出してから、時計を進める。 */
   step(now: Timestamp): void {
-    for (const item of this.schedule.take(now)) {
-      if (this.declines(item.command, item.at)) continue;
-      this.send(item.command, item.at);
-    }
+    this.dispatchDue(now);
     this.releaseGhosts(now);
     this.seatSitters(now);
     this.arriveAtUncertain(now);
     this.advance(now);
     this.followSuggestions(now);
+  }
+
+  /**
+   * その時刻までに予定されている行動を、**予定が空になるまで**出す。
+   *
+   * **1 回取り出して終わりにすると、時刻が巻き戻る。** 出した行動の反応
+   * （呼ばれた → 席へ向かう）は、その行動を出した時刻を起点に予定へ入る。
+   * 起点が刻みの途中（たとえば 12959.7 秒）だと、反応も同じ刻みの中の
+   * **もう取り出したあとの時刻**に入ることがある。それは次の刻みまで残るが、
+   * そのときにはもう `tick` が時計を進めている。コアは 9.4 のとおり
+   * `CLOCK_WENT_BACKWARD` で弾き、**その人は着席できないまま消える**。
+   * `weekend-peak` の 200 シードに 2 回起きていた。
+   */
+  private dispatchDue(now: Timestamp): void {
+    for (let round = 0; round < MAX_DISPATCH_ROUNDS; round += 1) {
+      const due: readonly Scheduled[] = this.schedule.take(now);
+      if (due.length === 0) return;
+      for (const item of due) {
+        if (this.declines(item.command, item.at)) continue;
+        this.send(item.command, item.at);
+      }
+    }
   }
 
   /**
