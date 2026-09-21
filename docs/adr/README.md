@@ -5,6 +5,7 @@
 - 設計と方針の唯一の出典は [開発プラン](../260916_plan_OpenSeat.md) です。ADR はその中の**個別の判断の経緯**を保存します。
 - 決定を覆す場合、既存の ADR を書き換えず、新しい ADR を追加して古いものを `Superseded` にします。
 - 番号は連番。ファイル名は `NNNN-短い説明.md`。
+- **0007〜0010 は数字を根拠にした決定です。** 根拠は [方針比較レポート](../260921_report_policy_comparison.md) にあり、`pnpm sim --compare` で再現できます。
 
 ## 一覧
 
@@ -16,7 +17,10 @@
 | [0004](0004-pure-domain-core.md) | ドメインロジックを依存ゼロの純粋関数として `packages/core` に置く | Accepted | 2026-09-16 |
 | [0005](0005-single-container-sqlite.md) | 単一コンテナと SQLite を採用し、Vercel + Supabase を採らない | Accepted | 2026-09-16 |
 | [0006](0006-who-pays-for-hosting.md) | 運用費は試行段階のみ開発者が持ち、継続段階は施設が持つ | Accepted | 2026-09-16 |
-| 0007〜0010 | （Phase 1 の PR 15 で書く。割当方式、ホールドとノーショー、着席時間の上限、待ち時間の推定） | 予定 | — |
+| [0007](0007-allocation-and-fairness-override.md) | 割当は「ロス最小を基本、10 分以上長く待つ人を優先」とする | Accepted | 2026-09-21 |
+| [0008](0008-hold-and-no-show.md) | ホールドは 7 分・延長あり、ノーショーは 1 回だけ順番を保つ | Accepted | 2026-09-21 |
+| [0009](0009-seating-time-limit.md) | 着席時間の上限は `soft` 60 分・待ちがいるときだけとし、席を自動で取り上げない | Accepted | 2026-09-21 |
+| [0010](0010-eta-estimation.md) | 待ち時間の目安は「席が回るのを待つ」模擬で出し、確証の無い席はシステムが空けると決めた時刻で数える | Accepted | 2026-09-21 |
 | [0011](0011-who-may-free-an-uncertain-seat.md) | 着席の記録が残っている席を空席に戻せるのは、スタッフだけとする | Accepted | 2026-09-21 |
 
 ## テンプレート

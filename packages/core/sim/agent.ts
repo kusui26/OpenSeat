@@ -178,6 +178,14 @@ export interface Sitter {
   readonly scans: boolean;
   /** 退席を申告するか。登録した人と同じ率で引く。 */
   readonly reportsCheckout: boolean;
+  /**
+   * どの席に座るかの目。0 以上 1 未満。
+   *
+   * **空いていて収まる席の中から、この目で 1 つ選ぶ。** 並び順の先頭から取ると、
+   * いつも同じ席が無断利用され、「長く空席のままの席ほど無断利用されている」
+   * （7.6）という現実が模型に現れない。
+   */
+  readonly seatRoll: number;
 }
 
 /**
@@ -202,5 +210,6 @@ export function createSitter(
     stay: Math.round(logNormal(rng, stayMedian(scenario, partySize), scenario.stay.sigma)),
     scans: bernoulli(rng, scenario.walkInShare),
     reportsCheckout: bernoulli(rng, scenario.checkoutReportRate),
+    seatRoll: rng.next(),
   };
 }

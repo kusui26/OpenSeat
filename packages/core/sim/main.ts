@@ -15,8 +15,9 @@
 
 import { writeFileSync } from 'node:fs';
 import process from 'node:process';
-import type { Batch } from './cli.js';
-import { parseArgs, runBatch, summaryOf, toCsv, USAGE } from './cli.js';
+import type { Batch, CliOptions } from './cli.js';
+import { parseArgs, runBatch, scenarioOf, summaryOf, toCsv, USAGE } from './cli.js';
+import { compare, compareCsv, compareText } from './compare.js';
 import { toHtml } from './report.js';
 
 function main(argv: readonly string[]): number {
@@ -30,13 +31,32 @@ function main(argv: readonly string[]): number {
     return 1;
   }
 
-  const batch: Batch = runBatch(options.value);
+  return options.value.compare ? comparison(options.value) : single(options.value);
+}
+
+/** 1 つのシナリオを何度も走らせる。 */
+function single(options: CliOptions): number {
+  const batch: Batch = runBatch(options);
   console.log(summaryOf(batch));
   const problems: readonly string[] = [...batch.defects, ...batch.gaps];
   if (problems.length > 0) return complain(problems);
 
-  write(options.value.out, () => toCsv(batch), 'CSV');
-  write(options.value.html, () => toHtml(batch), 'HTML');
+  write(options.out, () => toCsv(batch), 'CSV');
+  write(options.html, () => toHtml(batch), 'HTML');
+  return 0;
+}
+
+/** 設定を取り替えながら走らせ、差を取る（8.2）。 */
+function comparison(options: CliOptions): number {
+  const result = compare({
+    scenario: scenarioOf(options),
+    runs: options.runs,
+    seed: options.seed,
+  });
+  console.log(compareText(result));
+  if (result.defects.length > 0) return complain(result.defects);
+
+  write(options.out, () => compareCsv(result), 'CSV');
   return 0;
 }
 

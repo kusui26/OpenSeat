@@ -188,9 +188,25 @@ export interface SeatUse {
 /** 現実とのずれが表に出た回数。 */
 export interface Incidents {
   readonly calls: number;
-  /** 案内された席に誰かが座っていた回数（7.8 の 10 行目）。 */
+  /**
+   * **席を確保して呼んだのに、着いたら誰かが座っていた回数**（7.8 の 10 行目）。
+   *
+   * 渡すと約束した席を渡せなかった、という事故である。8.3 が「事故の件数と率」と
+   * 呼んでいるのはこれ。
+   */
   readonly seatTaken: number;
   readonly seatTakenRate: number;
+  /**
+   * 「空いている可能性が高い席」を見に行ったら使用中だった回数（7.11 の 3 層目）。
+   *
+   * **事故ではない。** 確証が無いと断ったうえで確かめに行ってもらった結果で、
+   * 仕組みが働いている証拠である。歩かせた手間は掛かるので別に数える。
+   *
+   * **同じ `TableReportedInUse` から出るので、分けずに数えると `assign_needs_check`
+   * を切ったときに「事故が減った」と読めてしまう**（実測で 5.5% → 1.6%。
+   * 減ったのは事故ではなく、確かめに行く回数だった）。
+   */
+  readonly probedInUse: number;
   /** 呼ばれたのに来なかった回数。 */
   readonly noShows: number;
   readonly noShowRate: number;
@@ -310,7 +326,7 @@ export function collect(result: RunResult): Metrics {
     toSeat: summarize(elapsed(queued, seatedAt)),
     bySize: slicesBySize(queued, calledAt),
     seatUse: seatUseOf(result),
-    incidents: incidentsOf(result.events),
+    incidents: incidentsOf(result),
     recovery: recoveryOf(result),
     endings: endingsOf(result.events),
     fairness: overtaking(reachedPairs(queued, calledAt)),
@@ -464,11 +480,20 @@ function noShowLostOf(result: RunResult): DurationMs {
     .reduce((sum, wasted) => sum + wasted, 0);
 }
 
-/** 呼ばれたのに来なかった時刻を、人ごとに並べる。保留になった分も終わった分も。 */
+/**
+ * 呼ばれたのに来なかった時刻を、人ごとに並べる。
+ *
+ * **3 つの経路をすべて数える。** ノーショーの扱いは方針で変わり、出るイベントも
+ * 変わる。`requeue_once` は保留へ（`TicketPaused`）、`requeue_back` は待ちの
+ * 末尾へ（`TicketRequeued`）、`cancel` はそこで終わる（`TicketEnded`）。
+ * **1 つだけを数えると方針の比較が壊れる**（`requeue_back` のノーショーが
+ * 1 件も無いように見え、ノーショーで遊ばせた席時間が 0 分と出ていた）。
+ */
 function noShowTimes(events: readonly DomainEvent[]): ReadonlyMap<string, readonly Timestamp[]> {
   const times = new Map<string, readonly Timestamp[]>();
   const missed = [
     ...eventsOf(events, 'TicketPaused').filter((event) => event.reason === 'no_show'),
+    ...eventsOf(events, 'TicketRequeued').filter((event) => event.reason === 'no_show'),
     ...eventsOf(events, 'TicketEnded').filter((event) => event.endReason === 'no_show'),
   ];
   for (const event of missed) {
@@ -479,21 +504,43 @@ function noShowTimes(events: readonly DomainEvent[]): ReadonlyMap<string, readon
 
 // ---- 事故と回復 ----
 
-function incidentsOf(events: readonly DomainEvent[]): Incidents {
-  const calls: number = eventsOf(events, 'TicketCalled').length;
-  const seatTaken: number = eventsOf(events, 'TicketRequeued').filter(
-    (event) => event.reason === 'seat_taken',
-  ).length;
-  const noShows: number = eventsOf(events, 'TicketPaused').filter(
-    (event) => event.reason === 'no_show',
-  ).length;
+/**
+ * 事故と、確かめに行った結果を分ける。
+ *
+ * どちらも `TableReportedInUse` として出るので、**その直前に席がどの姿だった
+ * かで見分ける。** 確保していた席（`HELD`）なら事故、確認要の席なら空振りである。
+ */
+function incidentsOf(result: RunResult): Incidents {
+  const calls: number = eventsOf(result.events, 'TicketCalled').length;
+  const before: readonly (TableStatus | null)[] = eventsOf(result.events, 'TableReportedInUse')
+    .filter((event) => event.reportedByTicketId !== null)
+    .map((event) => statusBefore(result.tableSpans, event.tableId, event.at));
+  const seatTaken: number = before.filter((status) => status === 'HELD').length;
+  const noShows: number = countOf(noShowTimes(result.events));
   return {
     calls,
     seatTaken,
     seatTakenRate: share(seatTaken, calls),
+    probedInUse: before.filter((status) => status === 'NEEDS_CHECK').length,
     noShows,
     noShowRate: share(noShows, calls),
   };
+}
+
+function countOf(times: ReadonlyMap<string, readonly Timestamp[]>): number {
+  return [...times.values()].reduce((sum, list) => sum + list.length, 0);
+}
+
+/** その時刻の直前に、席がどの姿だったか。区間が無ければ `null`。 */
+function statusBefore(
+  spans: readonly TableSpan[],
+  tableId: string,
+  at: Timestamp,
+): TableStatus | null {
+  const earlier = spans
+    .filter((span) => span.tableId === tableId && span.until <= at)
+    .toSorted((a, b) => (a.until === b.until ? a.from - b.from : a.until - b.until));
+  return earlier.at(-1)?.status ?? null;
 }
 
 function recoveryOf(result: RunResult): Recovery {
