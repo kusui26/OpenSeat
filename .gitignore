@@ -18,6 +18,7 @@ pnpm-debug.log*
 
 # ビルド成果物
 dist/
+dist-sim/
 build/
 out/
 .turbo/

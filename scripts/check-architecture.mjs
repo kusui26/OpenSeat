@@ -41,6 +41,22 @@ const FORBIDDEN_IN_SIM = [
   { pattern: /\bnew\s+Date\s*\(/, reason: '仮想時刻だけを使う' },
 ];
 
+/**
+ * シミュレータの本体で使ってはならない記述。**入口（`sim/main.ts`）だけが例外**。
+ *
+ * 引数を読む・ファイルに書く・画面に出すのは境界 1 つに閉じる（CLAUDE.md 4 章）。
+ * ここを開けると、指標の計算の途中に読み書きが混ざり、テストできなくなる。
+ */
+const FORBIDDEN_OUTSIDE_SIM_ENTRY = [
+  { pattern: /\bprocess\s*\./, reason: '引数と環境を読むのは sim/main.ts だけ' },
+  { pattern: /\bconsole\s*\./, reason: '画面に出すのは sim/main.ts だけ' },
+  { pattern: /\bfetch\s*\(/, reason: 'シミュレータは I/O を行わない' },
+  { pattern: /from\s+['"]node:/, reason: 'Node の組み込みに触るのは sim/main.ts だけ' },
+];
+
+/** シミュレータの入口。ここだけが `process` と `node:fs` に触ってよい。 */
+const SIM_ENTRY = join('packages', 'core', 'sim', 'main.ts');
+
 /** ルート層から直接触ってはならないもの。ドメインへの委譲を迂回させない。 */
 const FORBIDDEN_IN_ROUTES = [
   { pattern: /from\s+['"][^'"]*\/db\//, reason: 'ルートから永続化層を直接呼ばない（CLAUDE.md 3.1）' },
@@ -48,7 +64,7 @@ const FORBIDDEN_IN_ROUTES = [
   { pattern: /from\s+['"][^'"]*schema(\.js)?['"]/, reason: 'ルートからスキーマを直接参照しない' },
 ];
 
-const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'coverage', '.git']);
+const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-sim', 'build', 'coverage', '.git']);
 
 /** ディレクトリ配下の TypeScript ファイルを集める。存在しなければ空配列。 */
 async function collectSources(directory) {
@@ -149,6 +165,17 @@ async function checkSimIsReproducible() {
   return problems;
 }
 
+/** シミュレータの読み書きが、入口 1 つに閉じていることを確かめる。 */
+async function checkSimIoStaysAtEntry() {
+  const files = await collectSources(join(ROOT, 'packages', 'core', 'sim'));
+  const problems = [];
+  for (const file of files) {
+    if (isTest(file) || relative(ROOT, file) === SIM_ENTRY) continue;
+    problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_OUTSIDE_SIM_ENTRY));
+  }
+  return problems;
+}
+
 async function checkRouteBoundaries() {
   const files = await collectSources(join(ROOT, 'apps', 'server', 'src', 'routes'));
   const problems = [];
@@ -178,6 +205,7 @@ async function main() {
   failures += report('packages/core が依存ゼロである', await checkCoreHasNoDependencies());
   failures += report('packages/core が純粋である（時刻・乱数・環境・I/O を持たない）', await checkCorePurity());
   failures += report('packages/core/sim が再現可能である（種から導く乱数と仮想時刻だけ）', await checkSimIsReproducible());
+  failures += report('packages/core/sim の読み書きが sim/main.ts に閉じている', await checkSimIoStaysAtEntry());
   failures += report('ルート層が永続化層を直接呼んでいない', await checkRouteBoundaries());
 
   if (failures > 0) {

@@ -6,7 +6,12 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "types": []
+
+    // CLI の境界（`sim/main.ts`）が `process` と `node:fs` を使うので、Node の型を
+    // 入れてある。**純粋さを守っているのは型ではなく検査のほう**で、
+    // `eslint.config.js` と `scripts/check-architecture.mjs` が
+    // 「core は Node に触らない」「シミュレータの I/O は `main.ts` だけ」を落とす。
+    "types": ["node"]
   },
   "include": ["src/**/*.ts", "sim/**/*.ts"]
 }

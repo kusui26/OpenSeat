@@ -679,3 +679,70 @@ describe('待ち時間の目安と、登録をやめる人（7.13、7.5 の 5）
     expect(mean(rows.map((row) => row.予測))).toBeGreaterThan(mean(rows.map((row) => row.実績)));
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('席の区間の記録（PR 14）', () => {
+  /**
+   * **区間はイベントの列から組み直せない。**
+   *
+   * `TableReportedInUse` は使用中（誰か不明）と使用中（本人）の両方へ向かい、
+   * `StillHereAnswered` は席が使用中へ戻ったことを語らず、`VenueOpened` は
+   * どの席が戻ったかを持たない。だから状態から直に観測している。ここでは
+   * その観測が、席ごとに隙間なく時間を覆っていることを確かめる。
+   */
+  it('席ごとに、開始から見届けた時刻までを隙間なく覆う', () => {
+    const result = run({ scenario: SHORT, seed: 7 });
+    for (const table of result.state.tables) {
+      const mine = result.tableSpans
+        .filter((span) => span.tableId === table.id)
+        .toSorted((a, b) => a.from - b.from);
+      expect(mine[0]?.from).toBe(SIM_EPOCH);
+      expect(mine.at(-1)?.until).toBe(result.endedAt);
+      // 隣り合う区間が切れ目なくつながっている。
+      for (const [index, span] of mine.entries()) {
+        if (index > 0) expect(span.from).toBe(mine[index - 1]?.until);
+        expect(span.until).toBeGreaterThanOrEqual(span.from);
+      }
+    }
+  });
+
+  it('区間の合計は、卓数 × 見届けた時間にちょうど等しい', () => {
+    const result = run({ scenario: SHORT, seed: 7 });
+    const total = result.tableSpans.reduce((sum, span) => sum + (span.until - span.from), 0);
+    expect(total).toBe((result.endedAt - SIM_EPOCH) * result.state.tables.length);
+  });
+
+  /**
+   * **同じ刻みのうちに席が別の人へ渡ることがある。**
+   *
+   * ホールドの期限が切れて席が空き、その席が同じ `tick` のうちに次の人へ
+   * 確保される。状態はどちらも `HELD` なので、状態の変化だけを見ていると
+   * 2 人ぶんが 1 つの区間に潰れる。**潰れると、前の人がノーショーで遊ばせた
+   * 席時間が後の人のものとして数えられる**（実測で 3 分の 1 に出ていた）。
+   */
+  it('状態が同じでも、結びついた人が変われば区間を分ける', () => {
+    const result = run({ scenario: WEEKEND_PEAK, seed: 1 });
+    const merged = result.tableSpans.filter((span, index) => {
+      const next = result.tableSpans
+        .filter((other) => other.tableId === span.tableId)
+        .find((other) => other.from === span.until);
+      return next !== undefined && next.status === span.status && index >= 0;
+    });
+    // 同じ状態が隣り合うのは、結びついた人が変わったときだけである。
+    for (const span of merged) {
+      const next = result.tableSpans
+        .filter((other) => other.tableId === span.tableId)
+        .find((other) => other.from === span.until);
+      expect(next?.occupantTicketId).not.toBe(span.occupantTicketId);
+    }
+    // 実際にそういう区間が起きていること（空回りしていないことの確認）。
+    expect(merged.length).toBeGreaterThan(0);
+  });
+
+  it('同じシードなら、同じ区間が出る', () => {
+    const first = run({ scenario: SHORT, seed: 11 });
+    const again = run({ scenario: SHORT, seed: 11 });
+    expect(again.tableSpans).toEqual(first.tableSpans);
+  });
+});

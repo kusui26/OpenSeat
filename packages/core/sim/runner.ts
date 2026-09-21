@@ -27,9 +27,17 @@
  *
  * ## 何を返すか
  *
- * 状態・イベントの列・欠陥の一覧。**指標（待ち時間、稼働率）は PR 14 の責務**で、
- * ここではイベントを素のまま返す。イベントから計算できるものを先に固めると、
- * 指標の定義を変えるたびにシミュレータを触ることになる。
+ * 状態・イベントの列・欠陥の一覧と、**席がどの状態に何分いたか**（`tableSpans`）。
+ * **指標（待ち時間、稼働率）は PR 14 の責務**で、ここでは素の観測だけを返す。
+ * イベントから計算できるものを先に固めると、指標の定義を変えるたびに
+ * シミュレータを触ることになる。
+ *
+ * 席の区間だけは、イベントの列から組み直すことができない（PR 14 で分かった）。
+ * `TableReportedInUse` は `OCCUPIED_UNKNOWN` と `OCCUPIED` の両方へ向かい、
+ * `StillHereAnswered` は席が使用中へ戻ったことを語らず、`VenueOpened` は
+ * どの席が戻ったかを持たない。**イベントは「起きたこと」を語るが、「席がいま
+ * どの姿か」を語る責任を負っていない。** 推測で埋めると稼働率が静かに狂うので、
+ * 状態から直に観測する（Phase 2 への申し送りは本書の 11 章）。
  *
  * ## 欠陥
  *
@@ -44,6 +52,7 @@ import type {
   DomainEvent,
   Rejection,
   Table,
+  TableStatus,
   Timestamp,
   VenueState,
 } from '../src/index.js';
@@ -121,6 +130,13 @@ export interface RunResult {
   /** 目安を見て登録をやめた人（7.5 の 5）。 */
   readonly balked: readonly string[];
   /**
+   * 席がどの状態に、いつからいつまでいたか。稼働率を測るのに使う（8.3）。
+   *
+   * **全部つなぐと、席ごとに開始から終了までを隙間なく覆う。** それを検算に
+   * 使えるようにしてあるので、取りこぼしは `metrics.ts` の側で見つかる。
+   */
+  readonly tableSpans: readonly TableSpan[];
+  /**
    * コマンドを投入した時刻を、投入した順に並べたもの。
    *
    * **仮想の時計が巻き戻らないこと**を外から確かめられるようにしてある。
@@ -142,6 +158,54 @@ export interface WaitSample {
   readonly ticketId: string;
   readonly at: Timestamp;
   readonly minutes: number;
+}
+
+/**
+ * 席が 1 つの状態にいた時間。
+ *
+ * **境目は席の `statusSince` から取る。** 刻みの時刻で取ると、期限で動いた席が
+ * 最大 1 刻みぶんずれる（期限はその期限の時刻で処理される。PR 6）。
+ *
+ * **1 回の `apply` が席を 2 歩動かしたときは、途中の姿が残らない。** たとえば
+ * 片付けの猶予が明けて空席になり、同じ手のうちに次の人へ確保されると、空席で
+ * いた時間（最大 1 刻み）が直前の状態のぶんとして数えられる。占有と確保には
+ * 影響しない（どちらも途中で必ず一度観測される）ので、影響は空席の割合に
+ * 限られる。
+ */
+export interface TableSpan {
+  readonly tableId: string;
+  readonly status: TableStatus;
+  readonly from: Timestamp;
+  readonly until: Timestamp;
+  /**
+   * そのあいだ席に結びついていたチケット。結びつきが無ければ `null`。
+   *
+   * ひとつの区間のうちに別の人へ移ることはない（不変条件
+   * `one_ticket_per_table`）。記録が消えることはあるので、**最後に見えた
+   * 結びつき**を残す。
+   */
+  readonly occupantTicketId: string | null;
+}
+
+/** まだ閉じていない区間。 */
+type OpenSpan = Omit<TableSpan, 'until'>;
+
+/**
+ * 開いている区間が終わり、新しい区間が始まっているか。
+ *
+ * 状態が変わっていれば、もちろん別の区間である。**状態が同じでも、結びついて
+ * いる人が別人に変わっていれば別の区間**になる。1 回の `apply` のうちに
+ * 「確保 → 解放 → 別の人に確保」まで進むことがあり、そこを見落とすと
+ * **前の人のぶんが後の人のものとして数えられる**（ノーショーで遊ばせた席時間が
+ * 実際の 3 分の 1 に出ていた）。
+ *
+ * 結びつきが消えるだけ（`null` になる）のときは区切らない。同じ人の同じ区間で、
+ * 記録が先に消えただけだからである。
+ */
+function turnedOver(open: OpenSpan, table: Table): boolean {
+  if (open.status !== table.status) return true;
+  const next: string | null = table.occupantTicketId;
+  return next !== null && open.occupantTicketId !== null && next !== open.occupantTicketId;
 }
 
 /** 予定されている行動。 */
@@ -266,8 +330,14 @@ function plannedSitters(scenario: Scenario, seed: number, until: DurationMs): re
   return offsets.map((offset, index) => createSitter(seed, index, SIM_EPOCH + offset, scenario));
 }
 
-/** 到着する組を、シナリオの到着率から作る。 */
-function plannedParties(scenario: Scenario, seed: number): readonly Party[] {
+/**
+ * 到着する組を、シナリオの到着率から作る。
+ *
+ * **自由席のベースライン（`baseline.ts`）も、同じ関数から同じ人を受け取る。**
+ * 同じシードなら、同じ組が同じ時刻に、同じ人数で、同じ滞在時間だけ座る。
+ * 差として出るのは席の決まり方だけになる（共通乱数。`rng.ts`）。
+ */
+export function plannedParties(scenario: Scenario, seed: number): readonly Party[] {
   const offsets = arrivalTimes(streamFor(seed, 'arrivals', 0), scenario.arrivals, scenario.joinOpenFor);
   return offsets.map((offset, index) => createParty(seed, index, SIM_EPOCH + offset, scenario));
 }
@@ -326,6 +396,10 @@ class World {
   private readonly estimates: WaitSample[] = [];
   /** 目安を見て登録をやめた人（7.5 の 5）。 */
   private readonly balked: string[] = [];
+  /** 閉じた区間。 */
+  private readonly spans: TableSpan[] = [];
+  /** 席ごとの、まだ閉じていない区間。 */
+  private readonly openSpans = new Map<string, OpenSpan>();
 
   constructor(
     private readonly scenario: Scenario,
@@ -335,6 +409,7 @@ class World {
   ) {
     this.state = openVenue(scenario);
     this.pendingSitters = sitters;
+    this.observe();
   }
 
   /** 1 刻み進める。予定されている行動を出してから、時計を進める。 */
@@ -502,6 +577,7 @@ class World {
       return;
     }
     this.state = result.value.state;
+    this.observe();
     this.absorb(result.value.events, at);
   }
 
@@ -514,7 +590,44 @@ class World {
       return;
     }
     this.state = result.value.state;
+    this.observe();
     this.absorb(result.value.events, now);
+  }
+
+  /**
+   * 席の状態が変わっていたら、前の区間を閉じて次を開く。
+   *
+   * **状態を入れ替えた直後に必ず呼ぶ。** 呼び忘れると席の区間に穴が開くが、
+   * 区間が開始から終了までを隙間なく覆うことを `metrics.ts` が検算するので、
+   * 穴は数字ではなく失敗として出る。
+   */
+  private observe(): void {
+    for (const table of this.state.tables) {
+      const open: OpenSpan | undefined = this.openSpans.get(table.id);
+      if (open !== undefined && !turnedOver(open, table)) {
+        this.openSpans.set(table.id, {
+          ...open,
+          occupantTicketId: table.occupantTicketId ?? open.occupantTicketId,
+        });
+        continue;
+      }
+      if (open !== undefined) this.spans.push({ ...open, until: table.statusSince });
+      this.openSpans.set(table.id, {
+        tableId: table.id,
+        status: table.status,
+        from: table.statusSince,
+        occupantTicketId: table.occupantTicketId,
+      });
+    }
+  }
+
+  /** 開いたままの区間を、見届けた時刻で閉じる。 */
+  private closeSpans(endedAt: Timestamp): readonly TableSpan[] {
+    const trailing: readonly TableSpan[] = [...this.openSpans.values()].map((open) => ({
+      ...open,
+      until: endedAt,
+    }));
+    return [...this.spans, ...trailing];
   }
 
   /** 起きたことを記録し、利用者の反応を予定に入れる。 */
@@ -634,6 +747,7 @@ class World {
       defects: this.defects,
       estimates: this.estimates,
       balked: this.balked,
+      tableSpans: this.closeSpans(endedAt),
       appliedAt: this.appliedAt,
       endedAt,
     };

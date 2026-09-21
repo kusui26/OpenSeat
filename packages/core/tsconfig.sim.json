@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-sim",
+    "noEmit": false,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "tsBuildInfoFile": "./dist-sim/.tsbuildinfo",
+
+    // CLI の境界（`sim/main.ts`）だけが Node に触れる。ここでのみ型を入れる。
+    // `packages/core/tsconfig.json` は `types: []` のままにしてあるので、
+    // `src` と `sim` の残りが Node の機能を使えば、そちらの検査で落ちる。
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "sim/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "sim/**/*.test.ts"]
+}

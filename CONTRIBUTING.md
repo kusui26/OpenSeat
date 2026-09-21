@@ -52,8 +52,24 @@ pnpm verify      # lint、typecheck、テスト、アーキテクチャ検査、
 | `pnpm test` | Vitest（`pnpm test:watch` で監視） |
 | `pnpm check:arch` | 層の境界の検査。`packages/core` の依存ゼロと純粋性、ルート層から永続化層への直接依存 |
 | `pnpm check:links` | ドキュメント内の相対リンクの検査 |
+| `pnpm sim` | シミュレーションを走らせ、指標を出す（開発プラン 8 章） |
 
 `pnpm check:arch` と `pnpm check:links` は依存を持たない素の Node スクリプトなので、`pnpm install` の前でも動きます。
+
+### シミュレーション
+
+実証実験の前に、コアロジックのルールと既定値を離散事象シミュレーションで評価します（[開発プラン 8 章](docs/260916_plan_OpenSeat.md)）。**シミュレータはサーバとまったく同じ `packages/core` を使う**ので、ロジックの二重実装になりません。
+
+```
+pnpm sim                                            # 既定（weekend-peak を 20 回）
+pnpm sim --scenario weekend-overload --runs 200     # 過負荷を 200 回
+pnpm sim --runs 200 --out result.csv --html out.html  # CSV と HTML レポートを書き出す
+pnpm sim --help
+```
+
+同じシードからは必ず同じ結果が出ます。**実装の誤りを示す拒否が 1 件でもあれば、書き出さずに終了コード 1 で終わります。**
+
+出てくる数字は 8.1 の初期値に基づくもので、**現地観察で置き換える前のものです。ルールの相対比較には使えますが、絶対値を施設に示さないでください**（開発プラン 8.5）。
 
 ## 実装の規約
 
