@@ -1,0 +1,18 @@
+# 組み立てに要らないものは送らない。速さと、秘密を混ぜない安全のため。
+node_modules
+**/node_modules
+**/dist
+**/dist-sim
+**/data
+**/*.tsbuildinfo
+coverage
+.git
+.github
+docs
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+sim-output

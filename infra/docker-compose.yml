@@ -1,0 +1,27 @@
+# 手元で、本番と同じ形で動かす（開発プラン 9.13）。
+#
+# **第三者が `docker compose up -d` だけで起動できること**が 11.4 の完了条件の
+# 1 つなので、ここは「読んで分かる最小」に保つ。
+#
+#   docker compose -f infra/docker-compose.yml up --build
+
+services:
+  openseat:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: openseat:local
+    ports:
+      - "8080:8080"
+    environment:
+      # 施設の識別子。Phase 2 では複数施設になる（9.6）。
+      VENUE_ID: spike
+      # 版を画面に出すためだけのもの。Railway では GIT_SHA が入る。
+      GIT_SHA: local
+    volumes:
+      # **記録はここに残る。** コンテナを作り直しても消えない。
+      - openseat-data:/data
+    restart: unless-stopped
+
+volumes:
+  openseat-data:

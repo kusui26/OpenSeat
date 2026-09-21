@@ -110,3 +110,30 @@ jobs:
           fi
           echo "検査は違反を正しく検知した。"
           rm packages/core/sim/__ci_violation.ts
+
+  # 成果物は「1 つのコンテナ」なので（ADR-0005）、組み上がることを CI で確かめる。
+  # 開発者の手元では Docker Desktop のイメージ取得が止まって確かめられなかった
+  # （docs/260921_report_spike.md の 3.1）。ここが通れば、その未知が閉じる。
+  image:
+    name: コンテナが組み上がり、通しで動く
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Node を用意する
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          # 依存はコンテナの中で入れる。ここでは smoke.sh が JSON を読むためだけに使う。
+          package-manager-cache: false
+
+      - name: イメージを組み立てる
+        run: docker build -f infra/Dockerfile -t openseat:ci .
+
+      - name: 大きさを出す
+        run: docker images openseat:ci --format '{{.Size}}'
+
+      - name: 受付から記録の取り戻しまで通す
+        run: ./infra/smoke.sh openseat:ci
