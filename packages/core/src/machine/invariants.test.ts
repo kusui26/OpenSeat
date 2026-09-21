@@ -93,14 +93,15 @@ const COVERED_BY_TESTS: readonly string[] = [
   'state_timestamps_are_set',
   'end_reason_matches_state',
   'join_requires_operating',
+  'unmanaged_table_is_disabled',
   'no_starvation',
   'priority_preserved_across_pause',
   'tick_idempotent',
 ];
 
 describe('宣言の全体', () => {
-  it('15 個の不変条件が宣言されている', () => {
-    expect(ALL_INVARIANT_NAMES).toHaveLength(15);
+  it('16 個の不変条件が宣言されている', () => {
+    expect(ALL_INVARIANT_NAMES).toHaveLength(16);
   });
 
   it('宣言されたすべての不変条件に、成立例と違反例のテストがある', () => {
@@ -112,7 +113,7 @@ describe('宣言の全体', () => {
   });
 
   it('3 つの群に分かれている', () => {
-    expect(STATE_INVARIANTS).toHaveLength(12);
+    expect(STATE_INVARIANTS).toHaveLength(13);
     expect(POST_ALLOCATION_INVARIANTS).toHaveLength(1);
     expect(TRANSITION_INVARIANTS).toHaveLength(2);
   });
@@ -363,6 +364,37 @@ describe('join_requires_operating', () => {
   /** 運用終了の手前。受付だけ閉じて、並んでいる人は最後まで案内する（7.14）。 */
   it('運用しながら受付だけ閉じていても成立する', () => {
     expectHealthy({ ...venue(base.tables, base.tickets), operating: true, joinOpen: false });
+  });
+});
+
+describe('unmanaged_table_is_disabled', () => {
+  const base = healthy();
+
+  /**
+   * **対象外なのに使える状態の席は、誰にも案内されない空席になる。**
+   * 割当は `enabled` で候補から外すので、画面には空席として見えるのに、
+   * いつまでも呼び出しが起きない席ができてしまう。
+   */
+  it('対象から外した席が空席のままだったら落ちる', () => {
+    const broken = base.tables.map((table) =>
+      table.id === 'tb-free' ? { ...table, enabled: false } : table,
+    );
+    expectOnlyViolated(venue(broken, base.tickets), 'unmanaged_table_is_disabled');
+  });
+
+  it('対象から外した席が DISABLED なら成立する', () => {
+    const excluded = base.tables.map((table) =>
+      table.id === 'tb-free' ? { ...table, enabled: false, status: 'DISABLED' as const } : table,
+    );
+    expectHealthy(venue(excluded, base.tickets));
+  });
+
+  /** 運用時間外は、対象席のまま `DISABLED` になる。これは崩れていない（7.14）。 */
+  it('対象席が運用時間外で DISABLED になっていても成立する', () => {
+    const closed = base.tables.map((table) =>
+      table.id === 'tb-free' ? { ...table, status: 'DISABLED' as const } : table,
+    );
+    expectHealthy(venue(closed, base.tickets));
   });
 });
 

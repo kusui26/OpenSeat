@@ -6,13 +6,15 @@
  * 「何が起こりうるか」だけを語り、「いま起こるか」の判断が振る舞いの側に
  * 閉じるようにするためである。
  *
- * **まだ実装されていないガードは、成立しないものとして扱う。** 判定を書き忘れた
- * 遷移が黙って通るより、拒否されて止まるほうが安全である（CLAUDE.md 2.1）。
- * 拒否の理由は `BLOCKED_BY_GUARD` ではなく `GUARD_NOT_IMPLEMENTED` になるので、
- * 「条件を満たさなかった」と「まだ書いていない」は呼び出し側から区別できる。
+ * **判定の無いガードは、成立しないものとして扱う。** 書き忘れた遷移が黙って通る
+ * より、拒否されて止まるほうが安全である（CLAUDE.md 2.1）。拒否の理由は
+ * `BLOCKED_BY_GUARD` ではなく `GUARD_NOT_IMPLEMENTED` になるので、「条件を
+ * 満たさなかった」と「まだ書いていない」は呼び出し側から区別できる。
  *
- * 宣言されたガードがすべて実装されていることは PR 12 で閉じる。
- * それまでのあいだ、残りは `unimplementedTicketGuards()` が数え上げる。
+ * **いまは宣言されているガード（チケット 10・席 5）すべてに判定がある。** それでも
+ * 上の扱いと数え上げ（`unimplementedTicketGuards()`）は残してある。ガードを足して
+ * 判定を書き忘れたときに、そこが空でなくなることで気づけるためで、空であることは
+ * `guards.test.ts` が見ている。
  */
 
 import { candidatesFor, pickCandidate } from '../allocation/choose.js';
@@ -48,9 +50,10 @@ export interface TableGuardContext {
 type TicketGuardPredicate = (context: TicketGuardContext) => boolean;
 
 /**
- * 実装済みのチケットのガード。
+ * チケットのガードの判定。
  *
- * **この版ですべて実装済みになった。**
+ * **宣言されている 10 個すべてに判定がある。** 表（`ticket-machine.ts`）と
+ * ここの鍵が一致していることは `guards.test.ts` が見ている。
  */
 const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardPredicate>>> = {
   /** 案内しようとしている席に人数が収まり、希望タグを満たすか（7.6）。 */
@@ -127,7 +130,7 @@ const TICKET_GUARD_PREDICATES: Partial<Readonly<Record<TicketGuard, TicketGuardP
   noNotificationChannel: ({ ticket }) => !ticket.hasNotificationChannel,
 };
 
-/** 実装済みの席のガード。**この版ですべて実装済みになった。** */
+/** 席のガードの判定。**宣言されている 5 個すべてに判定がある。** */
 const TABLE_GUARD_PREDICATES: Partial<
   Readonly<Record<TableGuard, (context: TableGuardContext) => boolean>>
 > = {
@@ -181,12 +184,12 @@ export function tableGuardIsImplemented(guard: TableGuard): boolean {
   return TABLE_GUARD_PREDICATES[guard] !== undefined;
 }
 
-/** 判定がまだ書かれていないチケットのガード。PR 12 で空になる。 */
+/** 判定が書かれていないチケットのガード。**いまは空。** 書き忘れるとここに現れる。 */
 export function unimplementedTicketGuards(): readonly TicketGuard[] {
   return TICKET_GUARDS.filter((guard) => !ticketGuardIsImplemented(guard));
 }
 
-/** 判定がまだ書かれていない席のガード。PR 12 で空になる。 */
+/** 判定が書かれていない席のガード。**いまは空。** 書き忘れるとここに現れる。 */
 export function unimplementedTableGuards(): readonly TableGuard[] {
   return TABLE_GUARDS.filter((guard) => !tableGuardIsImplemented(guard));
 }

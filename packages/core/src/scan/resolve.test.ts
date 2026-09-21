@@ -105,6 +105,12 @@ describe('7.8 の表の 10 行', () => {
     });
   });
 
+  /**
+   * **この状態は、`apply` と `tick` を通った施設には現れない。** 収まる空席が
+   * あれば、その人はその瞬間にもう呼ばれている（不変条件 `no_starvation`）。
+   * 分岐そのものを確かめるために手で組んでいる。前倒しの着席が実際に要るのは
+   * 「確認要」の席のほうで（7.11 の 3 層目）、そちらは下の describe で見ている。
+   */
   it('4. 待っていて、空席で収まり、順番を崩さない → すぐ使えるようにする', () => {
     const state = venue([table(SCANNED, 2)], [ticket('k1')]);
     expect(scan(state, 'k1')).toMatchObject({ kind: 'early_check_in', actions: ['CHECK_IN_EARLY'] });
@@ -121,6 +127,12 @@ describe('7.8 の表の 10 行', () => {
     expect(scan(state, null)).toMatchObject({ kind: 'walk_in_offer', actions: ['WALK_IN'] });
   });
 
+  /**
+   * **これも手で組んだ状態である。** 「待ちがいる」は「その席に収まる待ちが
+   * いる」と読むので（7.8 の 7 行目）、収まる人が待っている空席は残らない。
+   * 空席の QR にはいつでも飛び込み着席を出せることは、`resolve.property.test.ts`
+   * が確かめている。
+   */
   it('7. チケットなしで空席、待ちがいる → 受付へ誘導する', () => {
     const state = venue([table(SCANNED, 4)], [ticket('k1')]);
     expect(scan(state, null)).toMatchObject({ kind: 'queue_first', actions: [] });
@@ -379,8 +391,9 @@ describe('答えの無い組み合わせが 1 つも無い', () => {
       const outcome = resolveTableScan(stateFor(status, scanner), SCANNED, scanner === 'none' ? null : 'k1');
       if (outcome !== null) produced.add(outcome.kind);
     }
-    // 3 つだけは、ほかの人や別の席の条件が要るのでこの総当たりには出ない。
-    // それぞれ上の describe で 1 本ずつ見ている。
+    // 1 つだけは、ほかに収まる待ちの人がいる状態が要るので、この総当たりには
+    // 出ない（上の describe で 1 本見ている）。そしてその状態は、apply と tick を
+    // 通った施設には現れない（resolve.property.test.ts が見張っている）。
     const needsMoreSetup: readonly TableScanKind[] = [
       'queue_first', // 空席だが、ほかに収まる待ちの人がいる（7.8 の 7）
     ];

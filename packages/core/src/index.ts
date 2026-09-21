@@ -5,8 +5,10 @@
  * `Math.random()`、`process.env`、Node の組み込みモジュールを使わない。
  * 制約の根拠は ADR-0004、検査は `scripts/check-architecture.mjs` にある。
  *
- * 土台（時刻の扱い、呼び出し規約、不変条件）とドメインの型を公開する。
- * 状態機械・割当アルゴリズム・待ち時間推定は Phase 1 の後続の PR で実装する。
+ * 土台（時刻の扱い、呼び出し規約、不変条件）、ドメインの型、状態機械、割当、
+ * 座席 QR の分岐、運用時間帯を公開する。**状態を変えられる入口は `apply` と
+ * `tick` の 2 つだけ**にしてある（CLAUDE.md 3 章）。待ち時間の推定（ETA）は
+ * Phase 1 の PR 13 で足す。
  */
 
 export type { Timestamp, DurationMs } from './time.js';
@@ -177,6 +179,7 @@ export {
   stateTimestampsAreSet,
   endReasonMatchesState,
   joinRequiresOperating,
+  unmanagedTableIsDisabled,
   noStarvation,
   priorityPreservedAcrossPause,
   tickIdempotent,

@@ -245,3 +245,52 @@ describe('画面に出した操作は必ず通る（7.8、7.11）', () => {
     }
   });
 });
+
+/**
+ * **空席の QR を読んだ人には、いつでも「この席を使う」を出せる。**
+ *
+ * 7.8 の 7 行目（空席だが待ちがいるので受付へ誘導）は、`apply` と `tick` を
+ * 通った状態では起こらない。そこでの「待ちがいる」は **「その席に収まる待ちが
+ * いる」** と読むところ、割当がコマンドのたびに必ず走るので、**収まる人が
+ * 待っている空席が残らない**ためである（不変条件 `no_starvation`）。
+ *
+ * PR 12 が 7.8 の 4 行目（空席への前倒し着席）について置いた性質と対になる。
+ * どちらも「宣言は残し、到達しないことを性質で見張る」という同じ扱いである。
+ * 割当の走らせ方を変えて 7 行目が生き返れば、ここが落ちて気づける。
+ */
+describe('空席の QR には、いつでも飛び込み着席を出せる（7.8 の 6・7 行目）', () => {
+  it('どんな状態でも、空席を読んだチケットなしの人が受付へ回されない', () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ state, commands, stepMin }) => {
+        const played = play(state, commands, stepMin);
+        for (const seat of played.tables.filter((item) => item.status === 'FREE')) {
+          expect(resolveTableScan(played, seat.id, null)).toMatchObject({
+            kind: 'walk_in_offer',
+            actions: ['WALK_IN'],
+          });
+        }
+      }),
+      RUNS,
+    );
+  });
+
+  /**
+   * **空席が 1 つも出ない筋書きばかりでは、上の性質は空回りする。**
+   * 何席ぶん確かめているかを数えておく。**ここだけ種を固定してある**のは、
+   * 生成器そのものの点検だからである（上の性質は種を振る）。
+   */
+  it('その検査は、空回りしていない', () => {
+    let seats = 0;
+
+    fc.assert(
+      fc.property(scenarioArb, ({ state, commands, stepMin }) => {
+        seats += play(state, commands, stepMin).tables.filter(
+          (item) => item.status === 'FREE',
+        ).length;
+      }),
+      { ...RUNS, seed: 20260921 },
+    );
+
+    expect(seats).toBeGreaterThan(100);
+  });
+});

@@ -22,7 +22,11 @@
  * この設計の裏返しとして、**ガードは時間を見ない**。「どちらへ進むか」は
  * ガードが決め、「いつ進むか」は期限が決める（`guards.ts`）。
  *
- * この性質（時間の飛ばし方によらず同じ状態に落ち着く）は PR 12 で検証する。
+ * **時間の飛ばし方に対する保証は 2 本ある。** 「一度の `tick` で、来ている期限が
+ * すべて片づく」は条件なしに成り立つ。これが「再起動しても取りこぼさない」の
+ * 本体である。「刻み方によらず同じ状態に落ち着く」のほうは、**空席が無いときに
+ * だけ**成り立つ。呼び出しは「いま」起きる行為で、遡らせないと決めているからで
+ * ある（9.4）。どちらも `tick.property.test.ts` が確かめている。
  */
 
 import { findTable, findTicket, withTable, withTicket, type VenueState } from '../domain/state.js';
@@ -263,8 +267,10 @@ function noticeTimeLimit(state: VenueState, ticket: Ticket, now: Timestamp): Out
 /**
  * 「まだご利用中ですか」（7.11 の 2 層目）。
  *
- * 状態は変えない。1 人につき 1 回だけ出す。答えが無いまま
- * `stillHereTimeoutMin` が過ぎると、席が「確認要」に落ちる。
+ * 状態は変えない。答えが無いまま `stillHereTimeoutMin` が過ぎると、席が
+ * 「確認要」に落ちる。**答えが返れば、その時刻から測り直してもう一度出す。**
+ * 一度答えた人の席が二度と時間で回収されないと、同じ 7.11 が掲げる「最悪でも
+ * 席が永久に塞がらない」と食い違うためである（`deadlines.ts` の `stillHereAskAt`）。
  */
 function askStillHere(state: VenueState, ticket: Ticket, now: Timestamp): Outcome {
   if (ticket.tableId === null) {
