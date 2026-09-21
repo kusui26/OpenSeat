@@ -11,8 +11,8 @@ import {
 /**
  * 全体プラン 7.16「パラメータ一覧（既定値と根拠）」の転記。
  *
- * **この表が仕様との照合点である。** 7.16 の表は 25 行あり、そのうち 3 行が
- * 2 つのキーを定義するため、キーは全部で 28 個になる。
+ * **この表が仕様との照合点である。** 7.16 の表は 26 行あり、そのうち 3 行が
+ * 2 つのキーを定義するため、キーは全部で 29 個になる。
  *
  * `row` は 7.16 の表に書かれているキー名（スネークケース）、`key` は
  * TypeScript 側のキー名。名前を変えたものには `renamedBecause` を書く。
@@ -70,6 +70,7 @@ const SPEC_7_16: readonly SpecRow[] = [
     renamedBecause: '「5 回/時/端末」のうち、時間あたりの回数であることを名前で示した',
   },
   { row: 'join_cutoff_before_close_min', key: 'joinCutoffBeforeCloseMin', expected: 15 },
+  { row: 'assumed_stay_min', key: 'assumedStayMin', expected: 35 },
   {
     row: 'eta_display',
     key: 'etaBucketMin',
@@ -79,11 +80,11 @@ const SPEC_7_16: readonly SpecRow[] = [
 ];
 
 describe('Policy と全体プラン 7.16 の対応', () => {
-  it('7.16 の表は 25 行で、28 個のキーを定義する', () => {
+  it('7.16 の表は 26 行で、29 個のキーを定義する', () => {
     const rows = new Set(SPEC_7_16.map((entry) => entry.row));
-    expect(SPEC_7_16).toHaveLength(28);
+    expect(SPEC_7_16).toHaveLength(29);
     // hold_extension_min / max_extensions のように 1 行が 2 キーを定義する行が 3 つある
-    expect(rows.size).toBe(28);
+    expect(rows.size).toBe(29);
   });
 
   it('Policy のすべてのキーが 7.16 の表に現れる（実装に余分なキーが無い）', () => {

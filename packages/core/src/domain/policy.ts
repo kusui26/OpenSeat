@@ -1,7 +1,7 @@
 /**
  * 運用パラメータ。
  *
- * 全体プラン 7.16 のパラメータ一覧（25 行・28 キー）と 1 対 1 で対応する。
+ * 全体プラン 7.16 のパラメータ一覧（26 行・29 キー）と 1 対 1 で対応する。
  * 対応が保たれていることは `policy.test.ts` が検査する。**このファイルに
  * キーを足したら 7.16 の表にも足すこと**（CLAUDE.md 6.2）。
  *
@@ -140,7 +140,15 @@ export interface Policy {
    */
   readonly needsCheckAutoFreeMin: number | null;
 
-  // ---- 表示（7.13） ----
+  // ---- 待ち時間の推定（7.13） ----
+
+  /**
+   * 想定滞在時間（7.13 の `D`）。使用中の席があと何分で空くかの見積もりに使う。
+   *
+   * **測った平均ではなく、そう仮定する値である。** 実測が溜まったら施設ごとに
+   * 置き直す（7.13 の v1.1 は滞在時間の分布そのものを使う）。
+   */
+  readonly assumedStayMin: number;
 
   /** 待ち時間の目安を何分刻みの幅で見せるか。過度な精度を避ける。 */
   readonly etaBucketMin: number;
@@ -192,7 +200,8 @@ export const DEFAULT_POLICY: Policy = {
   unknownOccupancyToCheckMin: 40,
   needsCheckAutoFreeMin: 30,
 
-  // 表示
+  // 待ち時間の推定
+  assumedStayMin: 35,
   etaBucketMin: 5,
 };
 
@@ -237,6 +246,7 @@ const NON_NEGATIVE_KEYS = [
   'stillHerePromptMin',
   'stillHereTimeoutMin',
   'unknownOccupancyToCheckMin',
+  'assumedStayMin',
   'etaBucketMin',
 ] as const satisfies readonly NumericPolicyKey[];
 
@@ -273,10 +283,12 @@ function checkRelations(policy: Policy): readonly PolicyProblem[] {
 }
 
 function checkBounds(policy: Policy): readonly PolicyProblem[] {
+  return [...checkRequiredBounds(policy), ...checkOptionalBounds(policy)];
+}
+
+/** 0 では意味をなさない値。 */
+function checkRequiredBounds(policy: Policy): readonly PolicyProblem[] {
   const problems: PolicyProblem[] = [];
-  if (policy.maxPartySize !== null && policy.maxPartySize < 1) {
-    problems.push(problem('maxPartySize', 'null か 1 以上であること'));
-  }
   if (policy.maxQueueLength < 1) {
     problems.push(problem('maxQueueLength', '1 以上であること'));
   }
@@ -285,6 +297,19 @@ function checkBounds(policy: Policy): readonly PolicyProblem[] {
   }
   if (policy.etaBucketMin < 1) {
     problems.push(problem('etaBucketMin', '1 以上であること'));
+  }
+  // 0 にすると、使用中の席がすべて「いま空く」と見積もられる（7.13）。
+  if (policy.assumedStayMin < 1) {
+    problems.push(problem('assumedStayMin', '1 以上であること'));
+  }
+  return problems;
+}
+
+/** `null`（設定しない）を許す値。0 と取り違えないよう、別に見る。 */
+function checkOptionalBounds(policy: Policy): readonly PolicyProblem[] {
+  const problems: PolicyProblem[] = [];
+  if (policy.maxPartySize !== null && policy.maxPartySize < 1) {
+    problems.push(problem('maxPartySize', 'null か 1 以上であること'));
   }
   if (policy.needsCheckAutoFreeMin !== null && policy.needsCheckAutoFreeMin <= 0) {
     problems.push(problem('needsCheckAutoFreeMin', 'null か 1 以上であること'));

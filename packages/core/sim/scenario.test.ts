@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, minutes } from '../src/index.js';
 import { arrivalWindow, rateAt } from './distributions.js';
 import {
+  BALK_SHARE,
   CHECKOUT_REPORT_RATE,
   NO_SHOW,
   PARTY_SIZES,
@@ -20,6 +21,7 @@ import {
   scaleArrivals,
   seatCount,
   shareOfVenue,
+  withBalkShare,
   withCheckoutReportRate,
   withClosing,
   withPolicy,
@@ -113,6 +115,12 @@ describe('振る舞いのモデル（8.1 の残りの行）', () => {
   it('退席の申告率は 60%', () => {
     expect(CHECKOUT_REPORT_RATE).toBe(0.6);
   });
+
+  /** **8.1 に無い値。** 目安を見て引き返す割合は、実証実験の登録率から逆算する。 */
+  it('登録をやめる割合は、置き値の 0.5', () => {
+    expect(BALK_SHARE).toBe(0.5);
+    expect(WEEKEND_PEAK.balkShare).toBe(BALK_SHARE);
+  });
 });
 
 describe('到着率（8.1「到着」の行）', () => {
@@ -203,6 +211,10 @@ describe('差し替え（8.2 の比較で使う）', () => {
 
   it('退席の申告率を差し替えられる', () => {
     expect(withCheckoutReportRate(WEEKEND_PEAK, 1).checkoutReportRate).toBe(1);
+  });
+
+  it('登録をやめる割合を差し替えられる（7.5 の 5）', () => {
+    expect(withBalkShare(WEEKEND_PEAK, 0).balkShare).toBe(0);
   });
 
   it('運用時間を持たせられる（7.14）', () => {

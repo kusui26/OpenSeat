@@ -9,6 +9,7 @@ import {
   WEEKDAY_LUNCH,
   WEEKEND_OVERLOAD,
   WEEKEND_PEAK,
+  withBalkShare,
   withCheckoutReportRate,
   withClosing,
   withPolicy,
@@ -373,14 +374,17 @@ describe('整合性の回復が効いていること（7.10、7.11）', () => {
    *
    * 8.1 の退席申告率 60% をそのまま回すと、PR 9 までは 8 卓すべてが埋まった
    * まま戻らず、47 組中 7 組しか使い終わらなかった。7.11 の 3 つの層（問いかけ、
-   * 確認要の席の案内、時間経過による整理）が入って、**50 組中 39 組が使い終わる
-   * ようになった。**
+   * 確認要の席の案内、時間経過による整理）が入って、**席が回るようになった。**
+   *
+   * **PR 13 で数字が動いた。** 目安を見て登録をやめる人（7.5 の 5）が入り、
+   * 同じ種で 4 組が引き返す。そのぶん着席は 44 → 40 に減るが、**並んだ人の
+   * 実際の待ちは 40 分から 28 分に縮む**（4 シードの平均。PR 13 の記録）。
    */
   it('申告率 60%（8.1 の値）でも、席が回るようになった', () => {
     const result = run({ scenario: WEEKEND_PEAK, seed: 2026 });
     const done = result.state.tickets.filter((ticket) => ticket.state === 'DONE');
-    expect(done.length).toBeGreaterThan(35);
-    expect(countOf(result, 'TicketSeated')).toBeGreaterThan(40);
+    expect(done.length).toBeGreaterThan(33);
+    expect(countOf(result, 'TicketSeated')).toBeGreaterThan(37);
   });
 
   it('申告しなかった人の席は、問いかけと時間経過で取り戻される', () => {
@@ -551,5 +555,82 @@ describe('確認要の席を次の人に委ねる（7.11 の 3 層目）', () =>
     for (const seed of SEEDS) {
       expect(run({ scenario: WEEKEND_PEAK, seed }).defects).toEqual([]);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **待ち時間の目安（7.13）と、それを見て引き返す人（7.5 の 5）。**
+ *
+ * PR 8 が積み残した振る舞いである。目安が出せるようになって初めて、
+ * 「40 分以上お待ちいただく見込みです。登録しますか？」に答える人を置ける。
+ * これが入るまで、過負荷のシナリオは現実より厳しく出ていた。
+ */
+describe('待ち時間の目安と、登録をやめる人（7.13、7.5 の 5）', () => {
+  /** 予測と実績の組。実績は「登録してから呼ばれるまで」。 */
+  function samples(result: RunResult): readonly { readonly 予測: number; readonly 実績: number }[] {
+    const calledAt = new Map<string, Timestamp>();
+    for (const event of result.events) {
+      if (event.type === 'TicketCalled' && !calledAt.has(event.ticketId)) {
+        calledAt.set(event.ticketId, event.at);
+      }
+    }
+    return result.estimates.flatMap((sample) => {
+      const called: Timestamp | undefined = calledAt.get(sample.ticketId);
+      return called === undefined
+        ? []
+        : [{ 予測: sample.minutes, 実績: (called - sample.at) / minutes(1) }];
+    });
+  }
+
+  function mean(values: readonly number[]): number {
+    return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
+
+  it('到着した組の全員に、登録の前の目安が出ている', () => {
+    const result = run({ scenario: WEEKEND_PEAK, seed: 2026 });
+    expect(result.estimates).toHaveLength(result.parties.length);
+  });
+
+  it('目安が長いと、登録をやめる人が出る', () => {
+    expect(run({ scenario: WEEKEND_OVERLOAD, seed: 2026 }).balked.length).toBeGreaterThan(0);
+  });
+
+  it('やめる割合を 0 にすれば、1 人も引き返さない', () => {
+    expect(run({ scenario: withBalkShare(WEEKEND_PEAK, 0), seed: 2026 }).balked).toEqual([]);
+  });
+
+  /** **この振る舞いが入るまで、過負荷では待ち行列が上限まで伸びきっていた。** */
+  it('やめる人がいると、登録そのものが減る', () => {
+    const none = run({ scenario: withBalkShare(WEEKEND_OVERLOAD, 0), seed: 2026 });
+    const some = run({ scenario: WEEKEND_OVERLOAD, seed: 2026 });
+    expect(countOf(some, 'TicketJoined')).toBeLessThan(countOf(none, 'TicketJoined'));
+  });
+
+  /** 並ぶ人が減るので、並んだ人の待ちは短くなる。 */
+  it('やめる人がいると、並んだ人の実際の待ちが短くなる', () => {
+    const none = mean(samples(run({ scenario: withBalkShare(WEEKEND_PEAK, 0), seed: 2026 })).map((s) => s.実績));
+    const some = mean(samples(run({ scenario: WEEKEND_PEAK, seed: 2026 })).map((s) => s.実績));
+    expect(some).toBeLessThan(none);
+  });
+
+  /**
+   * **予測と実績の差（MAE）が測れる。** 数字そのものは PR 15 のレポートに載せる。
+   * ここでは「測れること」と「桁が壊れていないこと」だけを見る。
+   */
+  it('予測と実績の差が測れる', () => {
+    const rows = samples(run({ scenario: WEEKEND_PEAK, seed: 2026 }));
+    expect(rows.length).toBeGreaterThan(20);
+    expect(mean(rows.map((row) => Math.abs(row.予測 - row.実績)))).toBeLessThan(30);
+  });
+
+  /**
+   * **目安は長めに出る**（7.13 の「悲観側に寄せる」）。早く案内されるのは嬉しく、
+   * 遅れるのは不満なので、平均としては実績を上回っていてよい。
+   */
+  it('目安は、実績より長めに出る', () => {
+    const rows = samples(run({ scenario: WEEKEND_PEAK, seed: 2026 }));
+    expect(mean(rows.map((row) => row.予測))).toBeGreaterThan(mean(rows.map((row) => row.実績)));
   });
 });

@@ -73,6 +73,18 @@ export interface Scenario {
    * しか分からない。半々を初期値に置き、感度を見る。
    */
   readonly walkInShare: number;
+  /**
+   * 目安待ち時間が長いときに、登録をやめる割合（7.5 の 5）。
+   *
+   * **8.1 に数字が無い。** 7.5 は「40 分以上お待ちいただく見込みです。登録
+   * しますか？」を出すとしているが、そこで何割が引き返すかは書かれていない。
+   * 半々を初期値に置き、差し替えられるようにしてある（`walkInShare` と同じ扱い）。
+   *
+   * **この振る舞いが入るまで、過負荷のシナリオは現実より厳しく出ていた。**
+   * 実際には目安を見た人が並ばないので、待ち行列は上限まで伸びきらない。
+   */
+  readonly balkShare: number;
+
   /** 受付を開けておく時間。ここを過ぎた到着は受け付けない。 */
   readonly joinOpenFor: DurationMs;
   /**
@@ -213,6 +225,9 @@ export const UNREGISTERED_PER_TABLE_HOUR = 0.2;
 /** そのうち座席 QR を読む割合。**8.1 に無い。現地観察で置き換える。** */
 export const WALK_IN_SHARE = 0.5;
 
+/** 目安が長いときに登録をやめる割合。**8.1 に無い。実証実験で置き換える。** */
+export const BALK_SHARE = 0.5;
+
 // ---- 既定のシナリオ ----
 
 interface ScenarioParams {
@@ -239,6 +254,7 @@ function scenario(params: ScenarioParams): Scenario {
     checkoutReportRate: CHECKOUT_REPORT_RATE,
     unregisteredPerTableHour: UNREGISTERED_PER_TABLE_HOUR,
     walkInShare: WALK_IN_SHARE,
+    balkShare: BALK_SHARE,
     joinOpenFor: arrivalWindow(params.arrivals),
     closesAfter: null,
     policy: DEFAULT_POLICY,
@@ -333,4 +349,9 @@ export function withWalkInShare(base: Scenario, share: number): Scenario {
 /** 無断利用の率を差し替えたシナリオを作る。 */
 export function withUnregisteredRate(base: Scenario, perTableHour: number): Scenario {
   return { ...base, unregisteredPerTableHour: perTableHour };
+}
+
+/** 登録をやめる割合を差し替えたシナリオを作る（7.5 の 5 の効きを見る）。 */
+export function withBalkShare(base: Scenario, share: number): Scenario {
+  return { ...base, balkShare: share };
 }
