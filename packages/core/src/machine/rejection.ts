@@ -26,6 +26,7 @@
  * | `BLOCKED_BY_GUARD` | 遷移はあるが、条件を満たさない |
  * | `GUARD_NOT_IMPLEMENTED` | 遷移はあるが、条件の判定がまだ書かれていない |
  * | `REASON_REQUIRED` | スタッフの取り消しに理由が無い（7.9） |
+ * | `STAFF_ONLY` | 着席の記録が残っている席を、スタッフ以外が空席に戻そうとした（7.11） |
  * | `NO_CODE_AVAILABLE` | 生きているチケットが表示コードを使い切った |
  * | `CLOCK_WENT_BACKWARD` | 渡された時刻が状態の時刻より前（起きてはならない。9.4） |
  * | `INVARIANT_VIOLATED` | 出口の検査で不変条件が破れた（起きてはならない） |
@@ -43,6 +44,7 @@ export const REJECTION_CODES = [
   'BLOCKED_BY_GUARD',
   'GUARD_NOT_IMPLEMENTED',
   'REASON_REQUIRED',
+  'STAFF_ONLY',
   'NO_CODE_AVAILABLE',
   'CLOCK_WENT_BACKWARD',
   'INVARIANT_VIOLATED',

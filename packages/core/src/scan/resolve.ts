@@ -145,9 +145,27 @@ const WITHOUT_TICKET: Readonly<
   /** 退席直後の片付け中。 */
   TURNOVER: () => ['turnover', NO_ACTIONS],
 
-  /** 空いている可能性が高い席。どちらかを押してもらって解消する（7.11 の 3 層目）。 */
-  NEEDS_CHECK: () => ['needs_check', ['CONFIRM_FREE', 'REPORT_IN_USE']],
+  /**
+   * 空いている可能性が高い席。押してもらって解消する（7.11 の 3 層目）。
+   * 出す操作は席に着席の記録が残っているかで変わる（`reportActions`）。
+   */
+  NEEDS_CHECK: (_state, table) => ['needs_check', reportActions(table)],
 };
+
+/**
+ * 「確認要」の席で、案内されていない人が押せるもの。
+ *
+ * **着席の記録が残っている席では「空いていました」を出さない。** 押せばその記録の
+ * 人のチケットが終わるので、スタッフだけの操作にしてある（`apply.ts` の
+ * `checkWhoMayFree`、全体プラン 7.11 の 3 層目）。誰の記録も無い席は、これまで
+ * どおり誰でも空席に戻せる。終わるチケットが無く、誤っていても次の人の報告で戻る。
+ *
+ * **条件を「記録があるか」の 1 つだけにしてある。** 画面とコマンドで判定が割れない
+ * ようにするためで、割れていないことは `resolve.property.test.ts` が見張る。
+ */
+function reportActions(table: Table): readonly CommandType[] {
+  return table.occupantTicketId === null ? ['CONFIRM_FREE', 'REPORT_IN_USE'] : ['REPORT_IN_USE'];
+}
 
 /** その席に収まる待ちの人がいるか。いれば、その人のほうが先である。 */
 function hasWaiterFor(state: VenueState, table: Table): boolean {
@@ -223,12 +241,13 @@ function waitingScan(context: ScanContext): TableScanOutcome {
 /**
  * 「空いている可能性が高い席」に来た人（7.11 の 3 層目）。
  *
- * 画面に出す言葉は同じでも、押せるものが 2 通りある。
+ * 画面に出す言葉は同じでも、押せるものが 3 通りある。
  *
  * | 誰か | 空いていたとき | 使われていたとき |
  * |---|---|---|
  * | この席を案内された人 | `CHECK_IN_EARLY`（そのまま座る） | `REPORT_IN_USE` |
- * | それ以外の待っている人 | `CONFIRM_FREE`（空席として知らせる） | `REPORT_IN_USE` |
+ * | それ以外の人、記録の無い席 | `CONFIRM_FREE`（空席として知らせる） | `REPORT_IN_USE` |
+ * | それ以外の人、記録の残る席 | **出さない**（スタッフの仕事） | `REPORT_IN_USE` |
  *
  * **案内された人だけがそのまま座れる。** 7.11 は「着席されれば解消」と書いて
  * おり、確かめに行った人がその席を得られなければ「歩き回って探す」より悪く
@@ -238,7 +257,7 @@ function uncertainScan(context: ScanContext): TableScanOutcome {
   const { table } = context;
   const actions: readonly CommandType[] = guardPasses(context, 'earlyCheckInAllowed')
     ? ['CHECK_IN_EARLY', 'REPORT_IN_USE']
-    : ['CONFIRM_FREE', 'REPORT_IN_USE'];
+    : reportActions(table);
   return outcome('needs_check', table.id, actions, null, false);
 }
 

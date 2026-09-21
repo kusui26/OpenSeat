@@ -478,3 +478,76 @@ describe('使用中・空席の報告（7.8 の 9 行目、7.11 の 3 層目）'
     );
   });
 });
+
+/**
+ * **人のチケットを終わらせる操作だけ、スタッフに限る**（7.11 の 3 層目、7.15）。
+ *
+ * 「確認要」に落ちた席には 2 通りある。着席の記録が残っている席（退席の押し忘れが
+ * 疑われる席）と、誰の記録も無い席（無断利用が時間で落ちてきた席）である。前者を
+ * 空席に戻すと、記録の人のチケットが終わる。**通りすがりの一押しで他人の順番が
+ * 消えるのは、利用者に厳しすぎる**（CLAUDE.md 2.5）。後者は終わるチケットが無い
+ * ので、これまでどおり誰でも戻せる。
+ */
+describe('確認要の席を空席に戻せる人（7.11 の 3 層目）', () => {
+  /**
+   * 着席の記録が残ったまま「確認要」に落ちた席。
+   *
+   * 本来は問いかけへの無応答で落ちるが（7.11 の 2 層目）、時間を進める筋書きは
+   * `recovery.test.ts` が見ている。ここは席の状態だけを置き換えて作る。
+   */
+  function uncertainWithRecord(): VenueState {
+    const seated = run(
+      join(venue([table('tb-4', 4)]), 'k1', 2),
+      { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' },
+      at(1),
+    );
+    return {
+      ...seated,
+      tables: seated.tables.map((item) => ({ ...item, status: 'NEEDS_CHECK' as const })),
+    };
+  }
+
+  it('記録が残る席は、利用者が空席に戻せない', () => {
+    expectRejected(
+      apply(uncertainWithRecord(), { type: 'CONFIRM_FREE', tableId: 'tb-4', by: 'user' }, at(2)),
+      'STAFF_ONLY',
+    );
+  });
+
+  it('拒否されても、席もチケットも動かない', () => {
+    const before = uncertainWithRecord();
+    apply(before, { type: 'CONFIRM_FREE', tableId: 'tb-4', by: 'user' }, at(2));
+    expect(tableOf(before, 'tb-4').status).toBe('NEEDS_CHECK');
+    expect(ticketOf(before, 'k1').state).toBe('SEATED');
+  });
+
+  it('スタッフなら戻せる。記録の人は申告せずに去ったことになる', () => {
+    const decided = expectOk(
+      apply(uncertainWithRecord(), { type: 'CONFIRM_FREE', tableId: 'tb-4', by: 'staff' }, at(2)),
+    );
+    expect(tableOf(decided.state, 'tb-4').status).toBe('FREE');
+    expect(ticketOf(decided.state, 'k1').state).toBe('DONE');
+    expect(ticketOf(decided.state, 'k1').endReason).toBe('auto_release');
+  });
+
+  /** 席を守る側の報告は、これまでどおり誰でもできる。 */
+  it('記録が残る席でも、「使用中でした」は誰でも報告できる', () => {
+    const decided = expectOk(
+      apply(uncertainWithRecord(), { type: 'REPORT_IN_USE', tableId: 'tb-4', ticketId: null }, at(2)),
+    );
+    expect(tableOf(decided.state, 'tb-4').status).toBe('OCCUPIED');
+    expect(ticketOf(decided.state, 'k1').state).toBe('SEATED');
+  });
+
+  it('誰の記録も無い確認要の席は、利用者でも空席に戻せる', () => {
+    const state = venue([table('tb-4', 4, { status: 'NEEDS_CHECK' })]);
+    const decided = expectOk(apply(state, { type: 'CONFIRM_FREE', tableId: 'tb-4', by: 'user' }, at(1)));
+    expect(tableOf(decided.state, 'tb-4').status).toBe('FREE');
+  });
+
+  it('誰か分からない席も、利用者が空席に戻せる（記録が無いため）', () => {
+    const state = venue([table('tb-4', 4, { status: 'OCCUPIED_UNKNOWN' })]);
+    const decided = expectOk(apply(state, { type: 'CONFIRM_FREE', tableId: 'tb-4', by: 'user' }, at(1)));
+    expect(tableOf(decided.state, 'tb-4').status).toBe('FREE');
+  });
+});

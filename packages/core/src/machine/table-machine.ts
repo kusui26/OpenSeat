@@ -113,7 +113,7 @@ export const TABLE_TRANSITIONS = [
     to: 'OCCUPIED_UNKNOWN',
     guard: null,
     source: '7.4',
-    note: '第三者やスタッフから「使用中」の報告があった',
+    note: 'スタッフが「使用中にする」を押した。座席 QR には出さない操作である',
   },
   {
     from: 'FREE',
@@ -215,7 +215,7 @@ export const TABLE_TRANSITIONS = [
     to: 'FREE',
     guard: null,
     source: '7.11',
-    note: 'スタッフが巡回して空席であることを確認した',
+    note: '空席であることが確かめられた。誰の記録も無い席なので、誰の報告でもよい',
   },
   {
     from: 'OCCUPIED_UNKNOWN',
@@ -267,7 +267,7 @@ export const TABLE_TRANSITIONS = [
     to: 'FREE',
     guard: null,
     source: '7.11',
-    note: 'スタッフ、または次に案内された人が空席であることを確かめた',
+    note: '空席であることが確かめられた。着席の記録が残る席ではスタッフだけが押せる',
   },
   {
     from: 'NEEDS_CHECK',

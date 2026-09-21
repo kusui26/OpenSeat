@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type Policy } from '../domain/policy.js';
 import { createTable, type Table } from '../domain/table.js';
+import { createTicket, type Ticket } from '../domain/ticket.js';
 import { createVenueState, type VenueState } from '../domain/state.js';
 import { minutes, type Timestamp } from '../time.js';
 import { apply } from '../machine/apply.js';
@@ -24,6 +25,8 @@ import { resolveTableScan, type TableScanKind, type TableScanOutcome } from './r
 
 const NOW: Timestamp = 1_700_000_000_000;
 const TICKET_IDS: readonly string[] = ['k1', 'k2', 'k3'];
+/** 出発点から席に着いている人。待ち行列のコマンドが使う ID とは分けてある。 */
+const OCCUPANT_ID = 'k0';
 const TABLE_IDS: readonly string[] = ['tb0', 'tb1', 'tb2'];
 const RUNS = { numRuns: 200 };
 
@@ -52,19 +55,51 @@ const stateArb: fc.Arbitrary<VenueState> = fc
   .record({
     capacities: fc.array(fc.integer({ min: 1, max: 4 }), { minLength: 1, maxLength: 3 }),
     policy: policyArb,
+    uncertain: fc.boolean(),
   })
-  .map(({ capacities, policy }) => ({
-    ...createVenueState({
-      venueId: 'v1',
-      policy,
-      tables: capacities.map((capacity, index) => table(`tb${index}`, capacity)),
-    }),
-    operating: true,
-    joinOpen: true,
-  }));
+  .map(({ capacities, policy, uncertain }) => {
+    const opened: VenueState = {
+      ...createVenueState({
+        venueId: 'v1',
+        policy,
+        tables: capacities.map((capacity, index) => table(`tb${index}`, capacity)),
+      }),
+      operating: true,
+      joinOpen: true,
+    };
+    return uncertain ? withUncertainSeat(opened) : opened;
+  });
 
 function table(id: string, capacity: number): Table {
   return { ...createTable({ id, label: id, capacity, now: NOW }), status: 'FREE' };
+}
+
+/**
+ * **着席の記録が残ったまま「確認要」に落ちた席**を最初から持たせる（7.11 の 2 層目）。
+ *
+ * 問いかけへの無応答でこの形になるが、**ランダムなコマンドではめったに作れない。**
+ * 呼び出し・着席・時間の経過がすべて噛み合う必要があるためで、実測では 200 回
+ * まわして 1 度も出なかった。ここが空だと、7.11 の 3 層目の画面（いちばん判断が
+ * 込み入っているところ）が 1 度も試されない。出発点に置いて確実に踏ませる。
+ */
+function withUncertainSeat(state: VenueState): VenueState {
+  const first: Table | undefined = state.tables[0];
+  if (first === undefined) return state;
+
+  const occupant: Ticket = {
+    ...createTicket({ id: OCCUPANT_ID, code: 'Z-01', partySize: 1, now: NOW }),
+    state: 'SEATED',
+    tableId: first.id,
+    seatedAt: NOW,
+  };
+  return {
+    ...state,
+    tables: [
+      { ...first, status: 'NEEDS_CHECK', statusSince: NOW, occupantTicketId: occupant.id },
+      ...state.tables.slice(1),
+    ],
+    tickets: [occupant],
+  };
 }
 
 const ticketIdArb: fc.Arbitrary<string> = fc.constantFrom(...TICKET_IDS);

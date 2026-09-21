@@ -16,6 +16,8 @@
 | [0004](0004-pure-domain-core.md) | ドメインロジックを依存ゼロの純粋関数として `packages/core` に置く | Accepted | 2026-09-16 |
 | [0005](0005-single-container-sqlite.md) | 単一コンテナと SQLite を採用し、Vercel + Supabase を採らない | Accepted | 2026-09-16 |
 | [0006](0006-who-pays-for-hosting.md) | 運用費は試行段階のみ開発者が持ち、継続段階は施設が持つ | Accepted | 2026-09-16 |
+| 0007〜0010 | （Phase 1 の PR 15 で書く。割当方式、ホールドとノーショー、着席時間の上限、待ち時間の推定） | 予定 | — |
+| [0011](0011-who-may-free-an-uncertain-seat.md) | 着席の記録が残っている席を空席に戻せるのは、スタッフだけとする | Accepted | 2026-09-21 |
 
 ## テンプレート
 

@@ -279,6 +279,34 @@ describe('確認要の席（7.11 の 3 層目）', () => {
       actions: ['CONFIRM_FREE', 'REPORT_IN_USE'],
     });
   });
+
+  /**
+   * **着席の記録が残っている席では「空いていました」を出さない**（7.11 の 3 層目）。
+   * 押せばその記録の人のチケットが終わるので、スタッフだけの操作にしてある
+   * （`machine/scan-commands.test.ts` の「確認要の席を空席に戻せる人」）。
+   */
+  const withRecord = table(SCANNED, 4, { status: 'NEEDS_CHECK', occupantTicketId: 'k9' });
+  const occupant = ticket('k9', { state: 'SEATED', tableId: SCANNED, seatedAt: NOW });
+
+  it('記録が残る席では、チケットのない人に「使用中でした」だけを出す', () => {
+    expect(scan(venue([withRecord], [occupant]), null)).toMatchObject({
+      kind: 'needs_check',
+      actions: ['REPORT_IN_USE'],
+    });
+  });
+
+  it('記録が残る席では、案内されていない待ち人にも「使用中でした」だけを出す', () => {
+    const state = venue([withRecord, table(OTHER, 4, { status: 'NEEDS_CHECK' })], [occupant, ticket('k1')]);
+    expect(scan(state, 'k1')).toMatchObject({ kind: 'needs_check', actions: ['REPORT_IN_USE'] });
+  });
+
+  /** 案内された本人は、座ることで解消できる。確かめに行った人がその席を得る（7.11）。 */
+  it('記録が残る席でも、案内された人はそのまま座れる', () => {
+    expect(scan(venue([withRecord], [occupant, ticket('k1')]), 'k1')).toMatchObject({
+      kind: 'needs_check',
+      actions: ['CHECK_IN_EARLY', 'REPORT_IN_USE'],
+    });
+  });
 });
 
 describe('席の変更の条件（7.8 の 2 行目）', () => {
