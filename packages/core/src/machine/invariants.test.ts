@@ -94,14 +94,15 @@ const COVERED_BY_TESTS: readonly string[] = [
   'end_reason_matches_state',
   'join_requires_operating',
   'unmanaged_table_is_disabled',
+  'disabled_table_has_no_reservation',
   'no_starvation',
   'priority_preserved_across_pause',
   'tick_idempotent',
 ];
 
 describe('宣言の全体', () => {
-  it('16 個の不変条件が宣言されている', () => {
-    expect(ALL_INVARIANT_NAMES).toHaveLength(16);
+  it('17 個の不変条件が宣言されている', () => {
+    expect(ALL_INVARIANT_NAMES).toHaveLength(17);
   });
 
   it('宣言されたすべての不変条件に、成立例と違反例のテストがある', () => {
@@ -113,7 +114,7 @@ describe('宣言の全体', () => {
   });
 
   it('3 つの群に分かれている', () => {
-    expect(STATE_INVARIANTS).toHaveLength(13);
+    expect(STATE_INVARIANTS).toHaveLength(14);
     expect(POST_ALLOCATION_INVARIANTS).toHaveLength(1);
     expect(TRANSITION_INVARIANTS).toHaveLength(2);
   });
@@ -395,6 +396,40 @@ describe('unmanaged_table_is_disabled', () => {
       table.id === 'tb-free' ? { ...table, status: 'DISABLED' as const } : table,
     );
     expectHealthy(venue(closed, base.tickets));
+  });
+});
+
+describe('disabled_table_has_no_reservation', () => {
+  const base = healthy();
+
+  /**
+   * 残ると、翌日の運用開始でその席が一度空席として戻り、すぐまた外れる。
+   * 画面には一瞬「空きました」と出て消える。
+   */
+  it('運用から外れた席に、外す予約が残っていたら落ちる', () => {
+    const broken = base.tables.map((table) =>
+      table.id === 'tb-free'
+        ? { ...table, status: 'DISABLED' as const, enabled: false, disableAfterCurrent: true }
+        : table,
+    );
+    expectOnlyViolated(venue(broken, base.tickets), 'disabled_table_has_no_reservation');
+  });
+
+  /** 使われている席の予約は、利用が終わるまで持っていてよい（7.6 のエッジケース）。 */
+  it('使われている席に予約が立っていても成立する', () => {
+    const reserved = base.tables.map((table) =>
+      table.id === 'tb-occupied' ? { ...table, disableAfterCurrent: true } : table,
+    );
+    expectHealthy(venue(reserved, base.tickets));
+  });
+
+  it('予約が反映されて外れた席は成立する', () => {
+    const excluded = base.tables.map((table) =>
+      table.id === 'tb-free'
+        ? { ...table, status: 'DISABLED' as const, enabled: false, disableAfterCurrent: false }
+        : table,
+    );
+    expectHealthy(venue(excluded, base.tickets));
   });
 });
 

@@ -502,6 +502,91 @@ describe('席を対象から外す（7.6 のエッジケース）', () => {
   it('存在しない席は外せない', () => {
     expectRejected(apply(opened(), { type: 'DISABLE_TABLE', tableId: 'nope', by: 'staff' }, at(10)), 'TABLE_NOT_FOUND');
   });
+
+  /**
+   * **運用時間外の席も、誰も使っていない。** 待たせる理由が無いので、その場で外す。
+   * 予約のまま置くと、翌日の運用開始で一度空席として戻り、すぐまた外れる。
+   */
+  describe('運用していないあいだに外す', () => {
+    function excludedWhileClosed(): VenueState {
+      const closed = run(opened(), { type: 'CLOSE', by: 'staff' }, at(10));
+      expect(tableOf(closed, 'tb-4').status).toBe('DISABLED');
+      return run(closed, { type: 'DISABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(11));
+    }
+
+    it('その場で対象から外れる', () => {
+      const excluded = excludedWhileClosed();
+      expect(tableOf(excluded, 'tb-4').enabled).toBe(false);
+      expect(tableOf(excluded, 'tb-4').disableAfterCurrent).toBe(false);
+      expect(tableOf(excluded, 'tb-4').status).toBe('DISABLED');
+    });
+
+    /** 状態（`DISABLED`）は動かない。イベントは状態が動いたことを語るものである。 */
+    it('状態は動かないので、知らせは出ない', () => {
+      const closed = run(opened(), { type: 'CLOSE', by: 'staff' }, at(10));
+      const decided = expectOk(apply(closed, { type: 'DISABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(11)));
+      expect(eventTypes(decided)).toEqual([]);
+    });
+
+    it('翌日の運用を開始しても、その席は戻らない', () => {
+      const reopened = expectOk(
+        apply(excludedWhileClosed(), { type: 'OPEN', closesAt: at(780), by: 'staff' }, at(600)),
+      );
+      expect(tableOf(reopened.state, 'tb-4').status).toBe('DISABLED');
+      expect(eventTypes(reopened)).toEqual(['VenueOpened']);
+    });
+
+    it('対象に戻せば、翌日の運用で使えるようになる', () => {
+      const restored = run(excludedWhileClosed(), { type: 'ENABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(12));
+      const reopened = run(restored, { type: 'OPEN', closesAt: at(780), by: 'staff' }, at(600));
+      expect(tableOf(reopened, 'tb-4').status).toBe('FREE');
+    });
+  });
+
+  /**
+   * **外すと決めた席は、使われなくなった瞬間に外れる。** 席が運用から外れる道は
+   * 3 つあり（片付けの猶予が明けたとき、運用終了、全席解放）、**どれを通っても
+   * 予約を残さない**。残ると翌日の運用開始で一度空席として戻ってしまう。
+   */
+  describe('予約したまま、別の理由で席が外れたとき', () => {
+    it('片付けの猶予が明ける前に運用が終わっても、予約は残らない', () => {
+      const cleaning: Policy = { ...QUIET, turnoverMin: 10 };
+      let state = join(opened(cleaning), 'k1', 3, at(1));
+      state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' }, at(2));
+      state = run(state, { type: 'CHECK_OUT', ticketId: 'k1', by: 'user' }, at(3));
+      state = run(state, { type: 'DISABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(4));
+      expect(tableOf(state, 'tb-4').status).toBe('TURNOVER');
+
+      const closed = run(state, { type: 'CLOSE', by: 'staff' }, at(5));
+      expect(tableOf(closed, 'tb-4').enabled).toBe(false);
+      expect(tableOf(closed, 'tb-4').disableAfterCurrent).toBe(false);
+      expectHealthy(closed);
+    });
+
+    it('全席解放で外れても、予約は残らない', () => {
+      let state = join(opened(), 'k1', 3, at(1));
+      state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' }, at(2));
+      state = run(state, { type: 'DISABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(3));
+      expect(tableOf(state, 'tb-4').disableAfterCurrent).toBe(true);
+
+      const released = run(state, { type: 'RELEASE_ALL', by: 'staff' }, at(4));
+      expect(tableOf(released, 'tb-4').enabled).toBe(false);
+      expect(tableOf(released, 'tb-4').disableAfterCurrent).toBe(false);
+      expectHealthy(released);
+    });
+
+    /** 外れたあとに運用を開始しても、「空きました」は流れない。 */
+    it('どちらの道でも、翌日の運用開始で席が戻らない', () => {
+      let state = join(opened(), 'k1', 3, at(1));
+      state = run(state, { type: 'CHECK_IN', ticketId: 'k1', tableId: 'tb-4' }, at(2));
+      state = run(state, { type: 'DISABLE_TABLE', tableId: 'tb-4', by: 'staff' }, at(3));
+      state = run(state, { type: 'RELEASE_ALL', by: 'staff' }, at(4));
+
+      const reopened = expectOk(apply(state, { type: 'OPEN', closesAt: at(780), by: 'staff' }, at(600)));
+      expect(eventTypes(reopened)).toEqual(['VenueOpened']);
+      expect(tableOf(reopened.state, 'tb-4').status).toBe('DISABLED');
+    });
+  });
 });
 
 describe('席を対象に戻す（7.6 のエッジケース）', () => {

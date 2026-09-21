@@ -912,8 +912,13 @@ function handleReleaseAll(state: VenueState, _command: ReleaseAllCommand, now: T
 /**
  * 席を対象から外す。
  *
- * **空席ならその場で外れる。使われている席は利用が終わってから外れる**
+ * **使われていない席はその場で外れる。使われている席は利用が終わってから外れる**
  * （`disableAfterCurrent`）。呼び出し中の人を追い出さないための順序である。
+ *
+ * 使われていない席とは、空席（`FREE`）と、すでに運用から外れている席
+ * （`DISABLED`。運用時間外や、前日の終了で外れたまま）である。**後者を待たせない。**
+ * 誰も使っていないのに予約のまま置くと、翌日の運用開始で一度空席として戻り、
+ * すぐまた外れる。画面には一瞬「空きました」と出て消える。
  *
  * 空席をその場で外すのは、時刻を正しく刻むためでもある。出口（`settle`）に
  * 任せると「空いた時刻」で外れてしまい、**外すと決めるより前の時刻**が
@@ -922,6 +927,13 @@ function handleReleaseAll(state: VenueState, _command: ReleaseAllCommand, now: T
 function handleDisableTable(state: VenueState, command: DisableTableCommand, now: Timestamp): Outcome {
   const table: Table | undefined = findTable(state, command.tableId);
   if (table === undefined) return err(rejection('TABLE_NOT_FOUND', 'その席は存在しない'));
+
+  // すでに運用から外れている席。状態は動かないので遷移もイベントも無く、
+  // 管理対象から外すだけになる（`ENABLE_TABLE` の裏返し）。
+  if (table.status === 'DISABLED') {
+    const excluded: Table = { ...table, enabled: false, disableAfterCurrent: false };
+    return ok({ state: withTable(state, excluded), events: [] });
+  }
 
   const reserved: Table = { ...table, disableAfterCurrent: true };
   if (reserved.status !== 'FREE') return ok({ state: withTable(state, reserved), events: [] });

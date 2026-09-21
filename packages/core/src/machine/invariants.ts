@@ -294,6 +294,26 @@ export const unmanagedTableIsDisabled: Invariant<VenueState> = invariant(
   (state) => state.tables.every((table) => table.enabled || table.status === 'DISABLED'),
 );
 
+/**
+ * 14. 運用から外れている席に、外す予約は残らない。
+ *
+ * 「対象外にする」は、席が使われているあいだだけ保留される（7.6 のエッジケース）。
+ * 席が運用から外れた時点で、その予約は **反映されるか、意味を失うかのどちらか**で
+ * あって、残ることはない。
+ *
+ * 残ると何が起きるか。**翌日の運用開始で、その席が一度空席として戻り、すぐまた
+ * 外れる。** 画面には一瞬「空きました」と出て消え、イベントも `TableFreed` と
+ * `TableDisabled` が同じ時刻に並ぶ。数える側（8.3 の指標）もその 1 回を拾う。
+ *
+ * 席が外れる場所は 3 つある（片付けの猶予が明けたとき、運用終了、全席解放）。
+ * どれか 1 つで `leftService()` を通し忘れたら、ここが落ちる。
+ */
+export const disabledTableHasNoReservation: Invariant<VenueState> = invariant(
+  'disabled_table_has_no_reservation',
+  '運用から外れている席に、対象外にする予約が残っていない',
+  (state) => state.tables.every((table) => !table.disableAfterCurrent || table.status !== 'DISABLED'),
+);
+
 /** すべてのコマンド適用と `tick` の出口で検査する不変条件。 */
 export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   uniqueIds,
@@ -309,6 +329,7 @@ export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   endReasonMatchesState,
   joinRequiresOperating,
   unmanagedTableIsDisabled,
+  disabledTableHasNoReservation,
 ];
 
 // ---- 割当の直後にだけ成り立つ不変条件 ----

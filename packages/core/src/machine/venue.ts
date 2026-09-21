@@ -19,7 +19,7 @@
 
 import { withTable, withTicket, type VenueState } from '../domain/state.js';
 import { isActive, type EndReason, type Ticket } from '../domain/ticket.js';
-import type { Table } from '../domain/table.js';
+import { leftService, type Table } from '../domain/table.js';
 import { err, ok } from '../result.js';
 import type { Timestamp } from '../time.js';
 import type { CloseReason, DomainEvent } from './events.js';
@@ -125,7 +125,9 @@ function leaveService(state: VenueState, now: Timestamp): Outcome {
   for (const table of idle) {
     const moved = tableTransition({ state: current, table, now }, 'CLOSE');
     if (!moved.ok) return err(moved.error);
-    current = withTable(current, { ...table, status: moved.value, statusSince: now });
+    // 外すと決めてあった席は、ここで本当に外れる（`leftService`）。運用終了で
+    // 外れただけの席は対象席のままで、翌日の運用開始で戻る。
+    current = withTable(current, leftService(table, moved.value, now));
     events.push({ type: 'TableDisabled', at: now, tableId: table.id });
   }
   return ok({ state: current, events });
@@ -190,8 +192,15 @@ function releaseTables(state: VenueState, now: Timestamp): Outcome {
   return ok({ state: current, events });
 }
 
+/**
+ * 全席解放で外れる席。
+ *
+ * 誰も使っていない状態に戻すので、**外すと決めてあった席はここで本当に外れる**
+ * （`leftService`）。着席の記録も消える。緊急の操作なので、席の側にやり残しを
+ * 作らない。
+ */
 function released(table: Table, to: Table['status'], now: Timestamp): Table {
-  return { ...table, status: to, statusSince: now, occupantTicketId: null };
+  return { ...leftService(table, to, now), occupantTicketId: null };
 }
 
 // ---- 共通 ----
