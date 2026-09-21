@@ -224,6 +224,10 @@ export interface ReportInUseCommand {
  * 「使用中」と記録されている席が実際には空だったときに押す。
  * **誰が座っているか分かっている席（`OCCUPIED`）には使えない。** 遷移表に
  * 宣言が無く、第三者が着席中の人を追い出せないようにしてある。
+ *
+ * **「確認要」に落ちた席でも、着席の記録が残っているならスタッフだけが押せる**
+ * （7.11 の 3 層目）。その記録の人のチケットを終わらせる操作だからである。
+ * 記録の無い席は誰でも押せる。
  */
 export interface ConfirmFreeCommand {
   readonly type: 'CONFIRM_FREE';

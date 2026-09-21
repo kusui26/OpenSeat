@@ -675,6 +675,8 @@ function confirmOccupant(state: VenueState, table: Table, now: Timestamp): Outco
  * 第三者が着席中の人を追い出すことはできない。**「確認要」に落ちた席だけが、
  * 着席の記録を持ったまま空席に戻りうる。** そこまで落ちた席は、システムの側が
  * すでに「その人が居るか分からない」と認めた席である。
+ *
+ * **ただし、その記録を消せるのはスタッフだけ**（`checkWhoMayFree`）。
  */
 function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: Timestamp): Outcome {
   const table: Table | undefined = findTable(state, command.tableId);
@@ -682,6 +684,11 @@ function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: 
 
   const moved = tableTransition({ state, table, now }, 'CONFIRM_FREE');
   if (!moved.ok) return err(moved.error);
+
+  // **遷移を引いたあとに見る。** 着席中の席のように誰も空席に戻せない席では
+  // 「表に無い」が正しい理由で、スタッフなら通るかのような拒否を返さない。
+  const allowed: Rejection | null = checkWhoMayFree(table, command.by);
+  if (allowed !== null) return err(allowed);
 
   // 着席の記録が残ったままなら、その人は申告せずに去っている（7.11）。
   const cleared = reclaimSeat(withTable(state, verifiedFree(table, moved.value, now)), table.occupantTicketId, now);
@@ -693,6 +700,29 @@ function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: 
       ...cleared.value.events,
     ],
   });
+}
+
+/**
+ * その席を空席に戻してよい人か（全体プラン 7.11 の 3 層目、7.15）。
+ *
+ * **着席の記録が残っている席を空席に戻せるのは、スタッフだけである。** この操作は
+ * 記録の人のチケットを終わらせるので（`reclaimSeat`）、通りすがりの人の一押しで
+ * 他人の順番が消えることになってしまう。利用者に厳しくしない（CLAUDE.md 2.5）。
+ *
+ * **記録の無い席は、これまでどおり誰でも空席に戻せる。** 誰が使っているか分からない
+ * 席や、無断利用が時間で落ちてきた席がこれにあたる。終わるチケットが無いので、
+ * 誤っていても次に案内された人が「使用中でした」と報告すれば戻るだけである。
+ * 7.11 の 3 層目が速さで効いているのはこちらなので、狭めない。
+ *
+ * 案内された本人は、この操作を使わずに **座ること**（`CHECK_IN_EARLY`）で同じ場面を
+ * 解消できる。確かめに行った人がその席を得る、という 7.11 の筋はそのまま保たれる。
+ *
+ * **`by` がスタッフであることの確認は境界側の責務である**（Phase 2 の権限表）。
+ * `core` はコマンドに書かれた実行者を信じる。取り消しや退席の申告と同じ扱い。
+ */
+function checkWhoMayFree(table: Table, by: Actor): Rejection | null {
+  if (table.occupantTicketId === null || by === 'staff') return null;
+  return rejection('STAFF_ONLY', '着席の記録が残っている席を空席に戻せるのはスタッフだけ');
 }
 
 /** 人が見て空だと確かめた席。席の並び順で、いちばん確からしい空席になる（7.6）。 */
