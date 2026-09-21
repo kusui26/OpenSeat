@@ -1,0 +1,29 @@
+{
+  "name": "@openseat/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenSeat のサーバ。API・配信・スケジューラ・静的配信（開発プラン 9.2）。",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/src/main.js",
+  "files": [
+    "dist",
+    "db/migrations"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "start": "node dist/src/main.js",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@openseat/core": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "drizzle-kit": "^0.31.10"
+  }
+}

@@ -6,6 +6,7 @@ export default defineConfig({
       'packages/*/src/**/*.test.ts',
       'packages/*/sim/**/*.test.ts',
       'apps/*/src/**/*.test.ts',
+      'apps/*/db/**/*.test.ts',
     ],
     environment: 'node',
     /**
@@ -15,7 +16,7 @@ export default defineConfig({
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
-      include: ['packages/*/src/**/*.ts', 'packages/*/sim/**/*.ts'],
+      include: ['packages/*/src/**/*.ts', 'packages/*/sim/**/*.ts', 'apps/*/db/**/*.ts'],
       exclude: ['**/*.test.ts', '**/index.ts'],
     },
   },

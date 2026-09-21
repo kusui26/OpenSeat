@@ -22,6 +22,8 @@
 | [0009](0009-seating-time-limit.md) | 着席時間の上限は `soft` 60 分・待ちがいるときだけとし、席を自動で取り上げない | Accepted | 2026-09-21 |
 | [0010](0010-eta-estimation.md) | 待ち時間の目安は「席が回るのを待つ」模擬で出し、確証の無い席はシステムが空けると決めた時刻で数える | Accepted | 2026-09-21 |
 | [0011](0011-who-may-free-an-uncertain-seat.md) | 着席の記録が残っている席を空席に戻せるのは、スタッフだけとする | Accepted | 2026-09-21 |
+| [0012](0012-sqlite-driver.md) | SQLite のドライバを `better-sqlite3` とする | Accepted | 2026-09-22 |
+| [0013](0013-what-we-record.md) | 状態は行そのものとして持ち、イベントは配信と統計と監査のために別に残す | Accepted | 2026-09-22 |
 
 ## テンプレート
 

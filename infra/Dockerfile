@@ -4,9 +4,8 @@
 # 「Docker が動く環境が 1 つ」で引き取れることが、運用費の問題を解く唯一の道
 # だからである（9.1 の導入形態、14.4）。
 #
-# いまは Phase 2 の 1 日スパイク（`apps/spike`）を載せている。本物のサーバが
-# できたら `APP` を差し替える。**組み立て方そのものは変わらない**ので、ここが
-# スパイクの成果物のうち、いちばん長く残る部分になる。
+# 載せるのは `apps/server`（API・配信・スケジューラ・静的配信。9.2）。
+# 1 日スパイクで確かめた組み立て方をそのまま引き継いでいる。
 #
 #   docker build -f infra/Dockerfile -t openseat .
 #   docker run --rm -p 8080:8080 -v openseat-data:/data openseat
@@ -14,8 +13,8 @@
 # ---- 1. 依存を入れて組み立てる ----
 FROM node:22-alpine AS build
 
-# 組み立てるアプリ。本物のサーバができたら `apps/server` にする。
-ARG APP=apps/spike
+# 組み立てるアプリ。
+ARG APP=apps/server
 
 RUN corepack enable
 WORKDIR /repo
@@ -24,23 +23,22 @@ WORKDIR /repo
 # この層が使い回されるので、組み立てが速い。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/
-COPY apps/spike/package.json apps/spike/
+COPY apps/server/package.json apps/server/
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core packages/core
-COPY apps/spike apps/spike
+COPY apps/server apps/server
 RUN pnpm --filter @openseat/core build && pnpm --filter "./${APP}" build
 
 # **本番に要るものだけを取り出す。** `--prod` で開発用の依存を落とし、
 # ワークスペースの依存は実体として置かれる（`--legacy` を使わない理由）。
 RUN pnpm --filter "./${APP}" --prod deploy --legacy /out \
- && rm -f /out/dist/*.test.js
+ && rm -f /out/dist/db/*.test.js /out/dist/db/fixtures.js
 
 # ---- 2. 走らせる ----
 FROM node:22-alpine AS run
 
-ARG APP=apps/spike
 LABEL org.opencontainers.image.source="https://github.com/kusui26/OpenSeat"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
@@ -48,7 +46,8 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 # 消える（9.13 の Railway のボリューム）。
 ENV NODE_ENV=production \
     PORT=8080 \
-    DB_PATH=/data/openseat.db
+    DB_PATH=/data/openseat.db \
+    MIGRATIONS_DIR=/app/db/migrations
 
 WORKDIR /app
 COPY --from=build /out ./
@@ -65,4 +64,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # **`node` を PID 1 にする。** シェル越しに起動すると `SIGTERM` が届かず、
 # 再デプロイのときに記録を閉じられない（9.13 の「短い停止」）。
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]

@@ -53,7 +53,7 @@ pnpm verify      # lint、typecheck、テスト、アーキテクチャ検査、
 | `pnpm check:arch` | 層の境界の検査。`packages/core` の依存ゼロと純粋性、ルート層から永続化層への直接依存 |
 | `pnpm check:links` | ドキュメント内の相対リンクの検査 |
 | `pnpm sim` | シミュレーションを走らせ、指標を出す（開発プラン 8 章） |
-| `pnpm spike` | Phase 2 の 1 日スパイクを手元で動かす（開発プラン 9.13） |
+| `pnpm server` | サーバを手元で動かす（開発プラン 9.2） |
 
 `pnpm check:arch` と `pnpm check:links` は依存を持たない素の Node スクリプトなので、`pnpm install` の前でも動きます。
 
@@ -72,17 +72,23 @@ pnpm sim --help
 
 出てくる数字は 8.1 の初期値に基づくもので、**現地観察で置き換える前のものです。ルールの相対比較には使えますが、絶対値を施設に示さないでください**（開発プラン 8.5）。
 
-### 1 日スパイク（Phase 2 の入口）
+### サーバ
 
-Phase 2 は「Hono + SQLite + Docker + Railway が通ること」を 1 日で確かめるところから始まります（[開発プラン 9.13](docs/260916_plan_OpenSeat.md)）。その一式が [`apps/spike`](apps/spike) と [`infra/`](infra) にあり、結果は [スパイクの報告](docs/260921_report_spike.md) にまとめてあります。
+[`apps/server`](apps/server) が API・配信・スケジューラ・静的配信をまとめて受け持ちます（[開発プラン 9.2](docs/260916_plan_OpenSeat.md)）。成果物は **1 つのコンテナと SQLite** だけです（[ADR-0005](docs/adr/0005-single-container-sqlite.md)）。
 
 ```
-pnpm spike                                        # 手元で動かす（http://localhost:8080）
+pnpm server                                       # 手元で動かす（http://localhost:8080/healthz）
 docker compose -f infra/docker-compose.yml up --build   # コンテナで動かす
 ./infra/smoke.sh openseat:local                   # 組み上がったイメージを通しで試す
 ```
 
-**`apps/spike` は使い捨てです。** Phase 2 の最初の PR で消します。残るのは `infra/` の組み立て方と手順です。
+スキーマの出典は [`apps/server/db/schema.ts`](apps/server/db/schema.ts) です。**マイグレーションは生成物なので、手で書き足さないでください。**
+
+```
+pnpm --filter @openseat/server db:generate        # スキーマを変えたら生成し直す
+```
+
+Phase 2 はこの手前に「Hono + SQLite + Docker + Railway が通ること」を 1 日で確かめる工程を置きました（9.13）。結果は [スパイクの報告](docs/260921_report_spike.md) にあります。**その使い捨てのコードは役目を終えて消し、`infra/` の組み立て方だけが残っています。**
 
 ## 実装の規約
 

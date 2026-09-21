@@ -5,7 +5,7 @@
       "path": "./packages/core/tsconfig.build.json"
     },
     {
-      "path": "./apps/spike/tsconfig.json"
+      "path": "./apps/server/tsconfig.json"
     }
   ]
 }
