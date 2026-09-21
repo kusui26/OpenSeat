@@ -40,6 +40,11 @@ function countOf(result: RunResult, type: DomainEventType): number {
   return result.events.filter((event) => event.type === type).length;
 }
 
+/** コマンドを投入した時刻が、どこかで前に戻っているか（9.4）。 */
+function wentBackward(appliedAt: readonly Timestamp[]): boolean {
+  return appliedAt.some((at, index) => index > 0 && at < (appliedAt[index - 1] ?? at));
+}
+
 function ticketStates(result: RunResult): Readonly<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (const ticket of result.state.tickets) {
@@ -130,11 +135,13 @@ describe('再現できること', () => {
 describe('仮想の時計', () => {
   const result = run({ scenario: SHORT, seed: 5 });
 
+  /**
+   * **ここは 1 シードしか見ていない。** 現実のシナリオを 200 シード流す検査は
+   * 「不変条件（9.12）」にある。**この 1 本だけでは PR 13.5 の不具合を
+   * 見つけられなかった**（短いシナリオでは起きない）。
+   */
   it('コマンドを投入した時刻が巻き戻らない', () => {
-    const wentBack = result.appliedAt.filter(
-      (at, index) => index > 0 && at < (result.appliedAt[index - 1] ?? at),
-    );
-    expect(wentBack).toEqual([]);
+    expect(wentBackward(result.appliedAt)).toBe(false);
   });
 
   it('コマンドは、開始から終了までのあいだに投入される', () => {
@@ -323,6 +330,44 @@ describe('不変条件（9.12）', () => {
       run({ scenario: SHORT, seed }),
     ).filter((result) => result.defects.length > 0);
     expect(failures.map((result) => result.seed)).toEqual([]);
+  });
+
+  /**
+   * **現実のシナリオを 200 回**（Phase 1 プラン 1 章の完了条件 C8）。
+   *
+   * 上の 100 回は 1 時間の短いシナリオで、速いかわりに浅い。**3 時間半を 200 回
+   * 回して初めて見つかる壊れ方がある。** 実際、シミュレータが時刻を戻して
+   * コマンドを送る不具合（PR 13.5）は、200 シード中 2 回しか起きなかった。
+   *
+   * 時刻の巻き戻りもここで見る。コアは 9.4 のとおり拒否するので `defects` にも
+   * 出るが、**送る側の記録（`appliedAt`）でも確かめる**。片方だけだと、拒否を
+   * 握り潰す変更が入ったときに気づけない。
+   */
+  it('現実のシナリオを 200 回走らせても、拒否も時刻の巻き戻りも出ない（C8）', { timeout: 120_000 }, () => {
+    const problems: string[] = [];
+    for (let seed = 0; seed < 200; seed += 1) {
+      const result = run({ scenario: WEEKEND_PEAK, seed });
+      for (const defect of result.defects) {
+        problems.push(`種 ${String(seed)}: ${defect.code}`);
+      }
+      if (wentBackward(result.appliedAt)) problems.push(`種 ${String(seed)}: 時刻が巻き戻った`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  /**
+   * **PR 13.5 の不具合の再現テスト。**
+   *
+   * 予定した行動の反応が、同じ刻みの中の過ぎた時刻に入ると、次の刻みまで
+   * 取り残される。そのときにはもう `tick` が時計を進めているので、コアが
+   * `CLOCK_WENT_BACKWARD` で弾き、その人は着席できないまま消えていた。
+   */
+  it('同じ刻みの中で予定が増えても、時刻が巻き戻らない（種 76・190）', () => {
+    for (const seed of [76, 190]) {
+      const result = run({ scenario: WEEKEND_PEAK, seed });
+      expect(result.defects, `種 ${String(seed)}`).toEqual([]);
+      expect(wentBackward(result.appliedAt), `種 ${String(seed)}`).toBe(false);
+    }
   });
 
   it('退席の申告率を変えても、違反は出ない', () => {
