@@ -27,8 +27,8 @@ import type { BaselineMetrics, Distribution, Metrics, SizeSlice } from './metric
 import { collect, collectBaseline, PARTY_SIZES_REPORTED, spanCoverage } from './metrics.js';
 import { runBaseline } from './baseline.js';
 import { run } from './runner.js';
-import type { ScenarioName } from './scenario.js';
-import { SCENARIO_NAMES, SCENARIOS } from './scenario.js';
+import type { Scenario, ScenarioName } from './scenario.js';
+import { SCENARIO_NAMES, SCENARIOS, scaleArrivals, scaleStay } from './scenario.js';
 
 // ---- 引数 ----
 
@@ -43,6 +43,22 @@ export interface CliOptions {
   readonly html: string | null;
   /** 自由席のベースラインも走らせるか。 */
   readonly baseline: boolean;
+  /**
+   * 8.2 の方針比較を走らせるか。
+   *
+   * 真なら、1 つのシナリオを何度も走らせる代わりに、**設定を取り替えながら
+   * 同じシードで走らせて差を取る**（`compare.ts`）。
+   */
+  readonly compare: boolean;
+  /**
+   * 到着率と滞在時間を伸び縮みさせる倍率。どちらも既定は 1。
+   *
+   * **感度分析のためにある**（8.2 の「初期値を ±30% 振る」）。8.1 の数字は
+   * 現地観察で置き換える前のものなので、そこが 3 割ずれたときに結論が
+   * 変わるなら、その結論は弱い。
+   */
+  readonly arrivalFactor: number;
+  readonly stayFactor: number;
 }
 
 export const DEFAULT_OPTIONS: CliOptions = {
@@ -52,6 +68,9 @@ export const DEFAULT_OPTIONS: CliOptions = {
   out: null,
   html: null,
   baseline: true,
+  compare: false,
+  arrivalFactor: 1,
+  stayFactor: 1,
 };
 
 /** 走らせられる回数の上限。打ち間違いで何時間も回さないための歯止め。 */
@@ -66,13 +85,24 @@ export const USAGE = [
   '  --out <パス>       指標を CSV で書き出す（1 行 1 実行）',
   '  --html <パス>      分布のヒストグラムを HTML で書き出す',
   '  --no-baseline      自由席との比較を省く',
+  '  --compare          8.2 の方針比較を走らせる（設定を取り替えて差を取る）',
+  '  --arrivals <倍率>  到着率を伸び縮みさせる（感度分析。既定 1）',
+  '  --stay <倍率>      滞在時間を伸び縮みさせる（感度分析。既定 1）',
   '  --help             この案内を出す',
   '',
   `  シナリオ: ${SCENARIO_NAMES.join(', ')}`,
 ].join('\n');
 
 /** 値を取る旗と、その受け取り先。 */
-const VALUE_FLAGS = ['--scenario', '--runs', '--seed', '--out', '--html'] as const;
+const VALUE_FLAGS = [
+  '--scenario',
+  '--runs',
+  '--seed',
+  '--out',
+  '--html',
+  '--arrivals',
+  '--stay',
+] as const;
 
 type ValueFlag = (typeof VALUE_FLAGS)[number];
 
@@ -90,8 +120,9 @@ export function parseArgs(argv: readonly string[]): Result<CliOptions, string> {
   let options: CliOptions = DEFAULT_OPTIONS;
   for (let index = 0; index < argv.length; index += 1) {
     const flag: string = argv[index] ?? '';
-    if (flag === '--no-baseline') {
-      options = { ...options, baseline: false };
+    const switched: CliOptions | null = applySwitch(options, flag);
+    if (switched !== null) {
+      options = switched;
       continue;
     }
     if (!isValueFlag(flag)) return err(`知らない指定です: ${flag}`);
@@ -102,7 +133,23 @@ export function parseArgs(argv: readonly string[]): Result<CliOptions, string> {
     options = applied.value;
     index += 1;
   }
+  return validate(options);
+}
+
+/** 組み合わせとして成り立たない指定を断る。 */
+function validate(options: CliOptions): Result<CliOptions, string> {
+  // 比較は軸ごとの表を返すので、1 つのシナリオの分布を描く図にはならない。
+  if (options.compare && options.html !== null) {
+    return err('--compare と --html は一緒に使えません（比較は軸ごとの表です）');
+  }
   return ok(options);
+}
+
+/** 値を取らない旗。知らない旗なら `null` を返す。 */
+function applySwitch(options: CliOptions, flag: string): CliOptions | null {
+  if (flag === '--no-baseline') return { ...options, baseline: false };
+  if (flag === '--compare') return { ...options, compare: true };
+  return null;
 }
 
 function applyFlag(options: CliOptions, flag: ValueFlag, value: string): Result<CliOptions, string> {
@@ -119,7 +166,24 @@ function applyFlag(options: CliOptions, flag: ValueFlag, value: string): Result<
       return ok({ ...options, out: value });
     case '--html':
       return ok({ ...options, html: value });
+    case '--arrivals':
+      return mapFactor(value, flag, (arrivalFactor) => ({ ...options, arrivalFactor }));
+    case '--stay':
+      return mapFactor(value, flag, (stayFactor) => ({ ...options, stayFactor }));
   }
+}
+
+/** 伸び縮みの倍率。0 は「誰も来ない」「滞在しない」で、測るものが無くなる。 */
+function mapFactor(
+  value: string,
+  flag: string,
+  build: (parsed: number) => CliOptions,
+): Result<CliOptions, string> {
+  const parsed: number = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 10) {
+    return err(`${flag} は 0 より大きく 10 以下の数です: ${value}`);
+  }
+  return ok(build(parsed));
 }
 
 function isScenarioName(value: string): value is ScenarioName {
@@ -185,9 +249,23 @@ interface Outcome {
   readonly gaps: readonly string[];
 }
 
+/**
+ * 指定された倍率をかけたシナリオ。感度分析はここを通る。
+ *
+ * **倍率が両方 1 なら、8.1 の初期値そのままである。**
+ */
+export function scenarioOf(options: CliOptions): Scenario {
+  const base: Scenario = SCENARIOS[options.scenario];
+  return {
+    ...base,
+    arrivals: scaleArrivals(base.arrivals, options.arrivalFactor),
+    stay: scaleStay(base.stay, options.stayFactor),
+  };
+}
+
 /** 1 シードぶん走らせ、指標と「信じてよいか」を返す。 */
 function once(options: CliOptions, seed: number): Outcome {
-  const scenario = SCENARIOS[options.scenario];
+  const scenario = scenarioOf(options);
   const result = run({ scenario, seed });
   return {
     row: {
@@ -300,6 +378,7 @@ export const COLUMNS: readonly Column[] = [
   column('incidents', 'calls', (row) => row.metrics.incidents.calls),
   column('incidents', 'seat_taken', (row) => row.metrics.incidents.seatTaken),
   column('incidents', 'seat_taken_rate', (row) => row.metrics.incidents.seatTakenRate),
+  column('incidents', 'probed_in_use', (row) => row.metrics.incidents.probedInUse),
   column('incidents', 'no_shows', (row) => row.metrics.incidents.noShows),
   column('incidents', 'no_show_rate', (row) => row.metrics.incidents.noShowRate),
 
@@ -448,7 +527,8 @@ function recoveryLines(rows: readonly Row[]): readonly string[] {
   const of = (pick: (row: Row) => number): string => pad(meanOf(rows, pick), 6);
   return [
     '【事故と回復】（1 回あたりの平均）',
-    `  呼び出し ${of((row) => row.metrics.incidents.calls)}   席が塞がっていた ${of((row) => row.metrics.incidents.seatTaken)}   来なかった ${of((row) => row.metrics.incidents.noShows)}`,
+    `  呼び出し ${of((row) => row.metrics.incidents.calls)}   案内した席が塞がっていた ${of((row) => row.metrics.incidents.seatTaken)}   来なかった ${of((row) => row.metrics.incidents.noShows)}`,
+    `  確認要を見に行って使用中だった ${of((row) => row.metrics.incidents.probedInUse)}（事故ではない。確かめた結果）`,
     `  確認要 ${of((row) => row.metrics.recovery.needsCheck)}   うち利用者が解消 ${of((row) => row.metrics.recovery.clearedTo.OCCUPIED)}   自動解放など ${of((row) => row.metrics.recovery.clearedTo.FREE)}`,
     `  先を越された回数  平均 ${of((row) => row.metrics.fairness.overtakenMean)}   最大 ${of((row) => row.metrics.fairness.overtakenMax)}`,
     `  目安の誤差  MAE ${of((row) => row.metrics.eta.maeMin)} 分   偏り ${of((row) => row.metrics.eta.biasMin)} 分   突き合わせ ${of((row) => row.metrics.eta.samples)} 件（測れず ${of((row) => row.metrics.eta.unmatched)} 件）`,

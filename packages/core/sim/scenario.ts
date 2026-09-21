@@ -190,6 +190,21 @@ export function scaleArrivals(
 }
 
 /**
+ * 滞在時間を一定の割合で伸び縮みさせる。
+ *
+ * **感度分析に使う**（全体プラン 8.2 の「初期値を ±30% 振る」）。8.1 の滞在時間は
+ * 現地観察で置き換える前の値なので、そこが 3 割ずれていたときに結論が変わるなら、
+ * その結論は弱い。
+ */
+export function scaleStay(base: StayModel, factor: number): StayModel {
+  return {
+    ...base,
+    medianMin: base.medianMin * factor,
+    largePartyMedianMin: base.largePartyMedianMin * factor,
+  };
+}
+
+/**
  * 施設全体のうち、その席構成が占める割合。
  *
  * **対象席が施設の一部なら、登録するのもその割合の組だけ**という仮定を置く。

@@ -55,6 +55,9 @@ describe('引数の読み取り', () => {
       out: 'a.csv',
       html: 'a.html',
       baseline: false,
+      compare: false,
+      arrivalFactor: 1,
+      stayFactor: 1,
     });
   });
 

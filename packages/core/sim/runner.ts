@@ -513,13 +513,18 @@ class World {
   }
 
   private seatSitter(sitter: Sitter, now: Timestamp): void {
-    const table = this.state.tables.find(
+    const fitting: readonly Table[] = this.state.tables.filter(
       (item) =>
         item.enabled &&
         item.status === 'FREE' &&
         !this.ghosts.has(item.id) &&
         sitter.partySize <= item.capacity,
     );
+    // **並び順の先頭から取らない。** 先頭から取ると、いつも同じ席（`t0-0`）だけが
+    // 無断利用され、「長く空席のままの席ほど無断利用されている」（7.6）という
+    // 現実が模型に現れない。実際、退席確認の新しさで並べ替える規則の効きが
+    // 測れなくなっていた（PR 15 で分かった）。
+    const table: Table | undefined = fitting[Math.floor(sitter.seatRoll * fitting.length)];
     if (table === undefined) return;
 
     // **コマンドを送る前に覚える。** `WALK_IN` は同じ手のうちに `TicketSeated` を

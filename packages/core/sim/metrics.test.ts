@@ -301,19 +301,58 @@ describe('ノーショーで遊ばせた席時間', () => {
 });
 
 describe('事故と回復', () => {
-  it('「案内された席が塞がっていた」は、先頭へ戻された回数で数える', () => {
-    const takenBack: DomainEvent = {
-      type: 'TicketRequeued',
-      at: at(12),
-      ticketId: 'p0',
-      priorityAt: at(0),
-      reason: 'seat_taken',
-    };
-    const lateBack: DomainEvent = { ...takenBack, ticketId: 'p1', reason: 'no_show' };
+  /**
+   * **事故と空振りは、同じイベントから出る。**
+   *
+   * 確保していた席（`HELD`）で報告されたら「渡すと約束した席を渡せなかった」
+   * 事故、確認要の席で報告されたら「確かめに行ったら使用中だった」空振りで、
+   * 後者は仕組みが働いた結果である。分けずに数えると、確認要の案内を切った
+   * ときに「事故が減った」と読めてしまう（実測で 5.5% → 1.6%）。
+   */
+  it('確保していた席での報告は事故、確認要の席での報告は空振りとして数える', () => {
+    const reported = (tableId: string, min: number, ticketId: string): DomainEvent => ({
+      type: 'TableReportedInUse',
+      at: at(min),
+      tableId,
+      reportedByTicketId: ticketId,
+    });
     const seen = collect(
-      result({ events: [called('p0', 10), called('p1', 10), takenBack, lateBack] }),
+      result({
+        events: [called('p0', 10), called('p1', 10), reported('tb0', 12, 'p0'), reported('tb1', 20, 'p1')],
+        tableSpans: [
+          // tb0 は確保していた席。案内した先に誰かが座っていた＝事故。
+          span({ status: 'HELD', from: at(10), until: at(12), occupantTicketId: 'p0' }),
+          span({ status: 'OCCUPIED_UNKNOWN', from: at(12), until: at(60) }),
+          // tb1 は確認要の席。見に行ったら使用中だった＝空振り。
+          span({ tableId: 'tb1', status: 'NEEDS_CHECK', from: at(5), until: at(20) }),
+          span({ tableId: 'tb1', status: 'OCCUPIED_UNKNOWN', from: at(20), until: at(60) }),
+        ],
+      }),
     );
-    expect(seen.incidents).toMatchObject({ calls: 2, seatTaken: 1, seatTakenRate: 0.5 });
+    expect(seen.incidents).toMatchObject({ calls: 2, seatTaken: 1, seatTakenRate: 0.5, probedInUse: 1 });
+  });
+
+  /**
+   * **ノーショーの出方は方針で変わる。**
+   *
+   * `requeue_once` は保留へ、`requeue_back` は待ちの末尾へ、`cancel` はそこで
+   * 終わる。1 つだけを数えていたときは、`requeue_back` のノーショーが 1 件も
+   * 無いように見え、遊ばせた席時間が 0 分と出ていた。
+   */
+  it('ノーショーを、3 つの経路すべてから数える', () => {
+    const paused: DomainEvent = {
+      type: 'TicketPaused', at: at(12), ticketId: 'p0', until: at(22), reason: 'no_show',
+    };
+    const requeued: DomainEvent = {
+      type: 'TicketRequeued', at: at(13), ticketId: 'p1', priorityAt: at(13), reason: 'no_show',
+    };
+    const ended: DomainEvent = {
+      type: 'TicketEnded', at: at(14), ticketId: 'p2', endReason: 'no_show', by: null, cancelReason: null,
+    };
+    const seen = collect(
+      result({ events: [called('p0', 5), called('p1', 5), called('p2', 5), paused, requeued, ended] }),
+    );
+    expect(seen.incidents.noShows).toBe(3);
   });
 
   /** 確認要が何に変わったかで、誰が片づけたのかが分かる（8.3 のスタッフ介入）。 */
