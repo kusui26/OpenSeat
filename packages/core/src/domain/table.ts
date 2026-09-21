@@ -123,6 +123,29 @@ export function createTable(params: CreateTableParams): Table {
   };
 }
 
+/**
+ * 運用から外れた席（全体プラン 7.6 のエッジケース、7.14）。
+ *
+ * **「対象外にする」と決めてあった席は、ここで本当に外れる。** 運用時間外になった
+ * だけの席は対象席のままで、翌日の運用開始で戻る。この 2 つは別のことなので
+ * （7.14）、`enabled` を落とすのは予約があったときだけにする。
+ *
+ * **席が運用から外れる場所では、必ずこれを通すこと。** 片付けの猶予が明けたとき、
+ * 運用が終わったとき、全席解放のとき、と 3 か所で同じ判断が要る。1 か所でも
+ * 忘れると、**外したはずの席が翌日の運用開始で一度空席として戻り、すぐまた外れる**
+ * （画面には一瞬「空きました」と出て消える）。通し忘れは不変条件
+ * `disabled_table_has_no_reservation` が落とす。
+ */
+export function leftService(table: Table, to: TableStatus, now: Timestamp): Table {
+  return {
+    ...table,
+    status: to,
+    statusSince: now,
+    enabled: table.disableAfterCurrent ? false : table.enabled,
+    disableAfterCurrent: false,
+  };
+}
+
 const TAKEN_SET: ReadonlySet<TableStatus> = new Set(TAKEN_TABLE_STATUSES);
 
 /**

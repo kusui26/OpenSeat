@@ -21,7 +21,7 @@
  */
 
 import { findTable, findTicket, withTable, withTicket, type VenueState } from '../domain/state.js';
-import type { Table } from '../domain/table.js';
+import { leftService, type Table } from '../domain/table.js';
 import type { Ticket } from '../domain/ticket.js';
 import type { TicketId } from '../domain/ids.js';
 import type { Decision } from '../decision.js';
@@ -227,16 +227,9 @@ function leavesServiceAt(state: VenueState, table: Table): Timestamp | null {
 export function leaveService(state: VenueState, table: Table, now: Timestamp): Outcome {
   const moved = tableTransition({ state, table, now }, 'CLOSE');
   if (!moved.ok) return err(moved.error);
-  const excluded: Table = {
-    ...table,
-    status: moved.value,
-    statusSince: now,
-    // 対象外の予約があったときだけ、管理対象から本当に外す。
-    enabled: table.disableAfterCurrent ? false : table.enabled,
-    disableAfterCurrent: false,
-  };
+  // 対象外の予約があったときだけ、管理対象から本当に外す（`leftService`）。
   return ok({
-    state: withTable(state, excluded),
+    state: withTable(state, leftService(table, moved.value, now)),
     events: [{ type: 'TableDisabled', at: now, tableId: table.id }],
   });
 }
