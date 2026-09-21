@@ -211,8 +211,11 @@ export interface TimeLimitReached {
 /**
  * 「まだご利用中ですか」を出した（全体プラン 7.11 の 2 層目）。
  *
- * 退席ボタンの押し忘れを拾うための問いかけ。**1 人につき 1 回だけ出す。**
- * 答えが無いまま `stillHereTimeoutMin` が過ぎると、席は「確認要」になる。
+ * 退席ボタンの押し忘れを拾うための問いかけ。答えが無いまま
+ * `stillHereTimeoutMin` が過ぎると、席は「確認要」になる。
+ *
+ * **答えが返れば、その時刻から測り直してもう一度出る。** 長く座っている人には
+ * `stillHerePromptMin` ごとに届く（7.11 の 2 層目）。
  */
 export interface StillHereAsked {
   readonly type: 'StillHereAsked';

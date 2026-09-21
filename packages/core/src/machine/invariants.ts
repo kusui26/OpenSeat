@@ -168,10 +168,11 @@ export const assignedPartyFitsCapacity: Invariant<VenueState> = invariant(
  * 9. 確保中の席には期限がある。
  *
  * 期限が無いと、呼び出しに応じない人のために席が永久に押さえられる。
+ * **席の側（`CALLED` の席が `HELD` であること）は 6 が見る。** ここは期限だけ。
  */
 export const heldTableHasDeadline: Invariant<VenueState> = invariant(
   'held_table_has_deadline',
-  'CALLED のチケットは holdDeadline を持ち、その席は HELD である',
+  'CALLED のチケットは holdDeadline を持つ',
   (state) =>
     state.tickets
       .filter((ticket) => ticket.state === 'CALLED')
@@ -270,6 +271,29 @@ export const joinRequiresOperating: Invariant<VenueState> = invariant(
   (state) => !state.joinOpen || state.operating,
 );
 
+/**
+ * 13. 対象から外した席は、運用から外れている。
+ *
+ * `enabled`（対象席かどうか）と `DISABLED`（いま運用から外れているか）は別のことを
+ * 表す（全体プラン 7.14）。運用時間外でも対象席は対象席のままで、翌日また戻る。
+ * **だが逆向き、「対象外なのに使える状態の席」には意味が無い。** 割当は `enabled`
+ * を見て候補から外すので、そんな席があると **画面には空席として見えるのに、誰にも
+ * 案内されない席** ができる。
+ *
+ * **この向きが保たれているかぎり、空席はすべて管理対象である。** 収まる人が待って
+ * いる空席が残らないこと（`no_starvation`）が、例外なくすべての空席について言える。
+ * 7.8 の 4 行目と 7 行目が実装では到達しないという読み（7.8 の注記）は、これを
+ * 前提にしている。
+ *
+ * 外す道は 2 つ（利用の終わりと、運用の終了）で、どちらも席を `DISABLED` にするのと
+ * 同時に `enabled` を落としている（`settle.ts`）。ここはその約束を宣言にしたもの。
+ */
+export const unmanagedTableIsDisabled: Invariant<VenueState> = invariant(
+  'unmanaged_table_is_disabled',
+  '対象から外した席は DISABLED である',
+  (state) => state.tables.every((table) => table.enabled || table.status === 'DISABLED'),
+);
+
 /** すべてのコマンド適用と `tick` の出口で検査する不変条件。 */
 export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   uniqueIds,
@@ -284,6 +308,7 @@ export const STATE_INVARIANTS: readonly Invariant<VenueState>[] = [
   stateTimestampsAreSet,
   endReasonMatchesState,
   joinRequiresOperating,
+  unmanagedTableIsDisabled,
 ];
 
 // ---- 割当の直後にだけ成り立つ不変条件 ----

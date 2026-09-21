@@ -172,7 +172,12 @@ export interface Ticket {
    */
   readonly hasNotificationChannel: boolean;
 
-  /** 「まだご利用中ですか」を出した時刻。1 回だけ出すための記録（全体プラン 7.11 の 2 層目）。 */
+  /**
+   * 「まだご利用中ですか」を **最後に** 出した時刻（全体プラン 7.11 の 2 層目）。
+   *
+   * 答えを待つあいだ、同じ問いかけを繰り返さないための記録である。答えが返れば
+   * その時刻から測り直し、もう一度問いかける（`machine/deadlines.ts`）。
+   */
   readonly stillHereAskedAt: Timestamp | null;
 
   /**
