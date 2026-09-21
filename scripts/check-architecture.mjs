@@ -176,11 +176,24 @@ async function checkSimIoStaysAtEntry() {
   return problems;
 }
 
+/**
+ * ルート層の置き場の候補。
+ *
+ * **両方を見る。** CLAUDE.md 3.1 は `apps/server/routes` と書き、入口は
+ * `apps/server/src` にある。どちらに置かれても検査が素通りしないようにしておく。
+ * 片方だけを見ていると、**ファイルが 1 つも無いまま「違反なし」と言う**検査になる。
+ */
+const ROUTE_DIRECTORIES = [
+  join('apps', 'server', 'routes'),
+  join('apps', 'server', 'src', 'routes'),
+];
+
 async function checkRouteBoundaries() {
-  const files = await collectSources(join(ROOT, 'apps', 'server', 'src', 'routes'));
   const problems = [];
-  for (const file of files) {
-    problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_ROUTES));
+  for (const directory of ROUTE_DIRECTORIES) {
+    for (const file of await collectSources(join(ROOT, directory))) {
+      problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_ROUTES));
+    }
   }
   return problems;
 }

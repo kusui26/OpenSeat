@@ -2,7 +2,7 @@
 
 詳細は [開発プラン](260916_plan_OpenSeat.md) の 11 章にあります。ここは現在地と各フェーズの完了条件の要約です。
 
-**現在地: Phase 1 が完了し、Phase 2 の 1 日スパイクと実装プランができました。** 15 個の PR で 7.16 の既定値を数字で裏づけ（[方針比較レポート](260921_report_policy_comparison.md)、ADR-0007〜0010）、続けて Hono ＋ SQLite ＋ `packages/core` が通ることを確かめました（[スパイクの報告](260921_report_spike.md)）。**次は [Phase 2 の実装プラン](260921_plan_Phase2.md) の PR 1 からです。** Phase 0 で残っているのは現地観察 2 回と、ドメイン・パッケージ名の確保で、どちらも開発とは独立に進められます。
+**現在地: Phase 2 が始まり、PR 1（スキーマと永続化）が入りました。** Phase 1 の 15 個の PR で 7.16 の既定値を数字で裏づけ（[方針比較レポート](260921_report_policy_comparison.md)、ADR-0007〜0010）、[1 日スパイク](260921_report_spike.md)で Hono ＋ SQLite ＋ `packages/core` が通ることを確かめ、いま `apps/server` に**落ちても取り戻せる記録**が乗りました（ADR-[0012](adr/0012-sqlite-driver.md)・[0013](adr/0013-what-we-record.md)）。**次は [Phase 2 の実装プラン](260921_plan_Phase2.md) の PR 2（API 契約）です。** Phase 0 で残っているのは現地観察 2 回と、ドメイン・パッケージ名の確保で、どちらも開発とは独立に進められます。
 
 ## フェーズ
 

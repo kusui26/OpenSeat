@@ -7,5 +7,10 @@ packages:
 # 何のためのスクリプトかをここにコメントで残すこと。
 #
 # esbuild: Vitest が使うトランスパイラ。プラットフォーム用のバイナリを配置する。
+#
+# better-sqlite3: **スクリプトは要らない。** 13 系は musl を含む 8 つの prebuilt を
+# パッケージに同梱していて、読み込み時にその場で選ぶ。install スクリプト自体が
+# 存在しないので、許可しない（ADR-0012）。
 allowBuilds:
+  better-sqlite3: false
   esbuild: true

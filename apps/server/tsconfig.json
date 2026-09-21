@@ -1,15 +1,15 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    "rootDir": ".",
     "outDir": "./dist",
     "noEmit": false,
     "composite": true,
 
-    // ここは境界である。`process`・`node:sqlite`・HTTP に触ってよい唯一の層で、
+    // ここは境界である。`process`・`node:*`・HTTP・SQLite に触ってよい層で、
     // だから Node の型を入れる（`packages/core` は依存ゼロのまま）。
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "db/**/*.ts"],
   "references": [{ "path": "../../packages/core/tsconfig.build.json" }]
 }

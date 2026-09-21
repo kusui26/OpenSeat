@@ -5,7 +5,7 @@
     "dockerfilePath": "infra/Dockerfile"
   },
   "deploy": {
-    "startCommand": "node dist/main.js",
+    "startCommand": "node dist/src/main.js",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",

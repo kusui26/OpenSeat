@@ -33,7 +33,7 @@ export default tseslint.config(
         projectService: {
           // ルート直下の設定ファイルはどの tsconfig にも属さないため、
           // 型情報なしの既定プロジェクトで解析する。
-          allowDefaultProject: ['*.config.ts'],
+          allowDefaultProject: ['*.config.ts', 'apps/*/*.config.ts'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -44,6 +44,10 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
+
+      // 「この欄だけ落とす」は分割代入の残りで書く。落とす側の名前は使わないので、
+      // 未使用として数えない（ESLint の基本ルール側の既定に合わせる）。
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
 
       // 不変・関数型（CLAUDE.md 4 章）
       'prefer-const': 'error',

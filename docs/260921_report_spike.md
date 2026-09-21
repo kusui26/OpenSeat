@@ -2,7 +2,7 @@
 
 - **作成日**: 2026-09-21
 - **出典**: 開発プラン [9.13（デプロイ先と引き渡し）](260916_plan_OpenSeat.md)・9.3・11.4
-- **成果物**: [`apps/spike`](../apps/spike)、[`infra/`](../infra)
+- **成果物**: `apps/spike`（**Phase 2 の PR 1 で削除済み**）、[`infra/`](../infra)
 - **手順**: [`infra/README.md`](../infra/README.md)
 
 ---

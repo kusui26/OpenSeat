@@ -8,7 +8,7 @@
 | [`docker-compose.yml`](docker-compose.yml) | 手元で本番と同じ形で動かす |
 | [`railway.json`](railway.json) | Railway の設定（試行段階の既定の置き場。9.13） |
 
-**いまは Phase 2 の 1 日スパイク（`apps/spike`）を載せています。** 本物のサーバができたら `Dockerfile` の `APP` を `apps/server` に差し替えます。組み立て方そのものは変わりません。結果は [スパイクの報告](../docs/260921_report_spike.md) にあります。
+載せるのは [`apps/server`](../apps/server) です。組み立て方は [1 日スパイク](../docs/260921_report_spike.md)で確かめたものをそのまま引き継いでいます（差し替えたのは `Dockerfile` の `APP` だけ）。
 
 ---
 
@@ -18,12 +18,12 @@ Docker を使わずに動かせます。**まずこれが通ることを確か�
 
 ```bash
 pnpm install
-pnpm --filter @openseat/core build
-pnpm --filter @openseat/spike build
-cd apps/spike && DB_PATH=./data/spike.db node dist/main.js
+SEED_TABLES=8 pnpm server
 ```
 
-http://localhost:8080 を開くと、受付・着席・退席ができます。落として起こし直しても、状態は戻ります（記録は `apps/spike/data/spike.db`）。
+http://localhost:8080/healthz が答えれば動いています。落として起こし直しても施設と席は残ります（記録は `apps/server/data/openseat.db`）。
+
+**画面と API は PR 2 以降で入ります。** いまあるのは `/healthz` だけです。
 
 ### コンテナで動かす
 
@@ -70,7 +70,8 @@ railway link          # 既にあるプロジェクトに繋ぐ場合
 
 | 変数 | 値 | 備考 |
 |---|---|---|
-| `VENUE_ID` | 任意（例 `spike`） | 施設の識別子 |
+| `VENUE_ID` | 任意（例 `demo`） | 施設の識別子 |
+| `SEED_TABLES` | 任意（例 `8`） | **その施設がまだ無いときだけ**、この数だけ席を作る。席の一覧編集は PR 13 |
 | `GIT_SHA` | `${{RAILWAY_GIT_COMMIT_SHA}}` | 画面に版を出すため |
 
 `PORT` は Railway が入れるので設定しません。`DB_PATH` は `Dockerfile` の既定（`/data/openseat.db`）のままで構いません。
@@ -112,7 +113,8 @@ railway up
 
 | 無いもの | いつ |
 |---|---|
-| Litestream による継続バックアップ | Phase 2。S3 互換のバケットと鍵が要るので、スパイクでは試していません |
-| `apps/web`（React の SPA）の同梱 | Phase 2 |
-| 認証、レート制限、監査ログ | Phase 2 |
+| API と画面 | PR 2（契約）以降。いまは `/healthz` だけ |
+| Litestream による継続バックアップ | PR 9。S3 互換のバケットと鍵が要ります |
+| `apps/web`（React の SPA）の同梱 | PR 6 以降 |
+| 認証、レート制限、監査ログ | PR 12 |
 | さくらの VPS 向けの `systemd` の例 | Phase 5（引き渡しのとき。9.13 の引き渡し先の既定） |

@@ -1096,7 +1096,10 @@ openseat/
 - `tick` の中の順序は **チケットの期限 → 施設の期限（受付の締切・運用終了） → 席の期限 → 割当 → 不変条件の検査**。席の期限を割当より先に明かさないと、空いているはずの席が次の人に渡らない。後半 3 つは `apply` と共有する。
 - **渡された時刻が前より戻っていたら拒否する。** 状態は「最後に進んだ時刻」を持ち、`apply` と `tick` が入口で確かめる。期限の判定はすべて絶対時刻の比較なので、時計が戻ると **いったん過ぎた期限がまた「これから」に戻る**。壊れ方が静かなので入口で落とす。
 - **止まっていたあいだの呼び出しは遡らない。** 1 時間ぶん飛ばして `tick` を呼ぶと、席が空いた時刻はその期限の時刻で刻まれるが、次の人を呼ぶのは再開した時点になる。遡って呼び出すと、届いていない呼び出しのホールドがすでに切れていることになり、利用者に不利になる。**取りこぼしではなく、そう決めている。**
-- 発生したイベントは同一トランザクションで SQLite に追記し、状態スナップショットを更新してから WebSocket に配信する。起動時はスナップショット＋以降のイベントで復元。
+- **状態そのものが行である。** 施設・席・チケットの行が `VenueState` で、状態が変わるたびに同じトランザクションで書き戻す。起動時はその行から組み立てる（[ADR-0013](adr/0013-what-we-record.md)）。
+- 発生したイベントは同じトランザクションで追記してから WebSocket に配信する。**イベントは復元に使わない。** 「起きたこと」を語る契約であって、「席がいまどの姿か」を語る責任を負っていないため、イベントから状態は組み直せない（Phase 1 の PR 14 で判明）。イベントは配信（9.5）・統計（8.3）・監査に使う。
+- **順序を問うときはイベントの連番（`seq`）を見る。時刻（`at`）ではない。** 期限で起きたことは期限の時刻で刻むので（上記）、先に記録したイベントより前の時刻を持つことがある。記録した時刻は別に持ち、`at` との差を `tick` の遅れとして監視する。
+- **席がどの姿にいつからいつまでいたかは、別に記録する**（`table_status_log`）。稼働率（8.3）を出すために要る投影で、境界側が差分として書く。
 - クライアントからのコマンドには冪等キーを付け、モバイル回線での再送で二重適用しない。
 - 時刻はサーバ時刻のみを信頼し、クライアントは期限（絶対時刻）とサーバとの時計差を受け取ってカウントダウンを表示する。
 
@@ -1128,16 +1131,19 @@ erDiagram
 
 | テーブル | 主な列 |
 |---|---|
-| venues | id, slug, name, timezone, locale, managed_schedule, status |
+| venues | id, slug, name, timezone, locale, managed_schedule, status, policy, operating, join_open, closes_at, clock_at, next_code_seq |
 | zones | id, venue_id, name, sort |
-| tables | id, venue_id, zone_id, label, capacity, tags[], admin_rank, token（QR 用、再発行可）, enabled, status, status_since, verified_free_at, current_ticket_id, position(x,y,shape) |
-| tickets | id, venue_id, code, party_size, required_tags[], state, priority_at, created_at, called_at, hold_deadline, extensions, passes, no_shows, seated_at, left_at, table_id, client_token_hash, conflict_priority, end_reason |
-| events | id, venue_id, ts, actor(kind,id), type, ticket_id?, table_id?, payload(json) |
+| tables | id, venue_id, zone_id, label, capacity, tags[], admin_rank, token（QR 用、再発行可）, enabled, status, status_since, verified_free_at, occupant_ticket_id, disable_after_current, position(x,y,shape)（Phase 3） |
+| tickets | id, venue_id, code, party_size, required_tags[], state, priority_at, created_at, called_at, hold_deadline, hold_reminded_at, extensions, passes, no_shows, seated_at, ended_at, end_reason, table_id, client_token_hash, conflict_priority, pause_deadline, paused_since, paused_total, last_seen_at, has_notification_channel, still_here_asked_at, still_here_answered_at, time_limit_noticed_at |
+| events | seq, venue_id, at, recorded_at, actor(kind,id), type, ticket_id?, table_id?, payload(json) |
 | notification_channels | id, ticket_id, kind(webpush/line/email), address(暗号化), created_at, expires_at |
 | settings_versions | id, venue_id, version, json, published_at, published_by |
 | floor_layouts | venue_id, background_asset, canvas(json), draft/published |
 | users, memberships, sessions | スタッフ・管理者の認証と役割（owner/admin/staff） |
 | audit_log | スタッフ・管理者の操作履歴 |
+| table_status_log | 席がどの姿に、いつからいつまでいたか（稼働率のための投影。[ADR-0013](adr/0013-what-we-record.md)） |
+
+**この表は概略です。** 実装の出典は `apps/server/db/schema.ts` で、9.6 との対応は `apps/server/db/mapping.ts` に宣言し、テストが突き合わせています。
 
 ### 9.7 API（概略）
 

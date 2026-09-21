@@ -1,0 +1,926 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "2b1fab9c-5b41-4f6b-9f71-6c8b0ea61641",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "events": {
+      "name": "events",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ticket_id": {
+          "name": "ticket_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor_kind": {
+          "name": "actor_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "events_venue_seq": {
+          "name": "events_venue_seq",
+          "columns": [
+            "venue_id",
+            "seq"
+          ],
+          "isUnique": false
+        },
+        "events_venue_at": {
+          "name": "events_venue_at",
+          "columns": [
+            "venue_id",
+            "at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "events_venue_id_venues_id_fk": {
+          "name": "events_venue_id_venues_id_fk",
+          "tableFrom": "events",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "table_status_log": {
+      "name": "table_status_log",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_at": {
+          "name": "from_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "until_at": {
+          "name": "until_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "occupant_ticket_id": {
+          "name": "occupant_ticket_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "status_log_venue_table": {
+          "name": "status_log_venue_table",
+          "columns": [
+            "venue_id",
+            "table_id"
+          ],
+          "isUnique": false
+        },
+        "one_open_span_per_table": {
+          "name": "one_open_span_per_table",
+          "columns": [
+            "table_id"
+          ],
+          "isUnique": true,
+          "where": "until_at IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "table_status_log_venue_id_venues_id_fk": {
+          "name": "table_status_log_venue_id_venues_id_fk",
+          "tableFrom": "table_status_log",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "table_status_log_table_id_tables_id_fk": {
+          "name": "table_status_log_table_id_tables_id_fk",
+          "tableFrom": "table_status_log",
+          "tableTo": "tables",
+          "columnsFrom": [
+            "table_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "span_moves_forward": {
+          "name": "span_moves_forward",
+          "value": "until_at IS NULL OR until_at >= from_at"
+        },
+        "span_status_is_declared": {
+          "name": "span_status_is_declared",
+          "value": "status IN ('DISABLED', 'FREE', 'HELD', 'OCCUPIED', 'OCCUPIED_UNKNOWN', 'TURNOVER', 'NEEDS_CHECK')"
+        }
+      }
+    },
+    "tables": {
+      "name": "tables",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zone_id": {
+          "name": "zone_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capacity": {
+          "name": "capacity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tags": {
+          "name": "tags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "admin_rank": {
+          "name": "admin_rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status_since": {
+          "name": "status_since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "verified_free_at": {
+          "name": "verified_free_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "occupant_ticket_id": {
+          "name": "occupant_ticket_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "disable_after_current": {
+          "name": "disable_after_current",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {
+        "tables_venue": {
+          "name": "tables_venue",
+          "columns": [
+            "venue_id"
+          ],
+          "isUnique": false
+        },
+        "tables_token": {
+          "name": "tables_token",
+          "columns": [
+            "token"
+          ],
+          "isUnique": true
+        },
+        "tables_venue_label": {
+          "name": "tables_venue_label",
+          "columns": [
+            "venue_id",
+            "label"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "tables_venue_id_venues_id_fk": {
+          "name": "tables_venue_id_venues_id_fk",
+          "tableFrom": "tables",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tables_zone_id_zones_id_fk": {
+          "name": "tables_zone_id_zones_id_fk",
+          "tableFrom": "tables",
+          "tableTo": "zones",
+          "columnsFrom": [
+            "zone_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "capacity_is_positive": {
+          "name": "capacity_is_positive",
+          "value": "capacity >= 1"
+        },
+        "table_status_is_declared": {
+          "name": "table_status_is_declared",
+          "value": "status IN ('DISABLED', 'FREE', 'HELD', 'OCCUPIED', 'OCCUPIED_UNKNOWN', 'TURNOVER', 'NEEDS_CHECK')"
+        },
+        "unmanaged_table_is_disabled": {
+          "name": "unmanaged_table_is_disabled",
+          "value": "enabled OR status = 'DISABLED'"
+        },
+        "disabled_table_has_no_reservation": {
+          "name": "disabled_table_has_no_reservation",
+          "value": "NOT disable_after_current OR status <> 'DISABLED'"
+        },
+        "occupant_only_when_taken": {
+          "name": "occupant_only_when_taken",
+          "value": "occupant_ticket_id IS NULL OR status IN ('HELD', 'OCCUPIED', 'OCCUPIED_UNKNOWN', 'NEEDS_CHECK')"
+        }
+      }
+    },
+    "tickets": {
+      "name": "tickets",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_token_hash": {
+          "name": "client_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "party_size": {
+          "name": "party_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "required_tags": {
+          "name": "required_tags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "priority_at": {
+          "name": "priority_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "called_at": {
+          "name": "called_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hold_deadline": {
+          "name": "hold_deadline",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hold_reminded_at": {
+          "name": "hold_reminded_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "extensions": {
+          "name": "extensions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "passes": {
+          "name": "passes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "no_shows": {
+          "name": "no_shows",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "conflict_priority": {
+          "name": "conflict_priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "seated_at": {
+          "name": "seated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "end_reason": {
+          "name": "end_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pause_deadline": {
+          "name": "pause_deadline",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "paused_since": {
+          "name": "paused_since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "paused_total": {
+          "name": "paused_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "has_notification_channel": {
+          "name": "has_notification_channel",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "still_here_asked_at": {
+          "name": "still_here_asked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "still_here_answered_at": {
+          "name": "still_here_answered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "time_limit_noticed_at": {
+          "name": "time_limit_noticed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "tickets_venue_state": {
+          "name": "tickets_venue_state",
+          "columns": [
+            "venue_id",
+            "state"
+          ],
+          "isUnique": false
+        },
+        "one_ticket_per_table": {
+          "name": "one_ticket_per_table",
+          "columns": [
+            "table_id"
+          ],
+          "isUnique": true,
+          "where": "table_id IS NOT NULL AND state IN ('CALLED', 'SEATED')"
+        },
+        "unique_active_codes": {
+          "name": "unique_active_codes",
+          "columns": [
+            "venue_id",
+            "code"
+          ],
+          "isUnique": true,
+          "where": "NOT state IN ('DONE', 'CANCELLED', 'NO_SHOW', 'EXPIRED')"
+        }
+      },
+      "foreignKeys": {
+        "tickets_venue_id_venues_id_fk": {
+          "name": "tickets_venue_id_venues_id_fk",
+          "tableFrom": "tickets",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tickets_table_id_tables_id_fk": {
+          "name": "tickets_table_id_tables_id_fk",
+          "tableFrom": "tickets",
+          "tableTo": "tables",
+          "columnsFrom": [
+            "table_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "party_size_is_positive": {
+          "name": "party_size_is_positive",
+          "value": "party_size >= 1"
+        },
+        "ticket_state_is_declared": {
+          "name": "ticket_state_is_declared",
+          "value": "state IN ('WAITING', 'PAUSED', 'CALLED', 'SEATED', 'DONE', 'CANCELLED', 'NO_SHOW', 'EXPIRED')"
+        },
+        "end_reason_is_declared": {
+          "name": "end_reason_is_declared",
+          "value": "end_reason IS NULL OR end_reason IN ('checked_out', 'staff_checkout', 'auto_release', 'user_cancel', 'staff_cancel', 'venue_closed', 'no_show', 'abandoned', 'pause_expired', 'max_age')"
+        },
+        "assigned_has_table": {
+          "name": "assigned_has_table",
+          "value": "(NOT (state IN ('CALLED', 'SEATED')) OR (table_id IS NOT NULL))"
+        },
+        "terminal_holds_no_table": {
+          "name": "terminal_holds_no_table",
+          "value": "(NOT (state IN ('DONE', 'CANCELLED', 'NO_SHOW', 'EXPIRED')) OR (table_id IS NULL))"
+        },
+        "held_table_has_deadline": {
+          "name": "held_table_has_deadline",
+          "value": "(NOT (state = 'CALLED') OR (hold_deadline IS NOT NULL AND called_at IS NOT NULL))"
+        },
+        "state_timestamps_are_set": {
+          "name": "state_timestamps_are_set",
+          "value": "(NOT (state = 'SEATED') OR (seated_at IS NOT NULL)) AND (NOT (state = 'PAUSED') OR (pause_deadline IS NOT NULL AND paused_since IS NOT NULL)) AND (NOT (state IN ('DONE', 'CANCELLED', 'NO_SHOW', 'EXPIRED')) OR (ended_at IS NOT NULL AND end_reason IS NOT NULL))"
+        },
+        "notices_are_scoped": {
+          "name": "notices_are_scoped",
+          "value": "(NOT (state <> 'PAUSED') OR (paused_since IS NULL)) AND (NOT (state <> 'CALLED') OR (hold_reminded_at IS NULL)) AND (NOT (state <> 'SEATED') OR (still_here_asked_at IS NULL AND still_here_answered_at IS NULL AND time_limit_noticed_at IS NULL))"
+        },
+        "end_reason_matches_state": {
+          "name": "end_reason_matches_state",
+          "value": "end_reason IS NULL OR (end_reason = 'checked_out' AND state = 'DONE') OR (end_reason = 'staff_checkout' AND state = 'DONE') OR (end_reason = 'auto_release' AND state = 'DONE') OR (end_reason = 'user_cancel' AND state = 'CANCELLED') OR (end_reason = 'staff_cancel' AND state = 'CANCELLED') OR (end_reason = 'venue_closed' AND state = 'CANCELLED') OR (end_reason = 'no_show' AND state = 'NO_SHOW') OR (end_reason = 'abandoned' AND state = 'EXPIRED') OR (end_reason = 'pause_expired' AND state = 'EXPIRED') OR (end_reason = 'max_age' AND state = 'EXPIRED')"
+        }
+      }
+    },
+    "venues": {
+      "name": "venues",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'Asia/Tokyo'"
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'ja'"
+        },
+        "managed_schedule": {
+          "name": "managed_schedule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "policy": {
+          "name": "policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "operating": {
+          "name": "operating",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "join_open": {
+          "name": "join_open",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "closes_at": {
+          "name": "closes_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "clock_at": {
+          "name": "clock_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "next_code_seq": {
+          "name": "next_code_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "venues_slug": {
+          "name": "venues_slug",
+          "columns": [
+            "slug"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "join_requires_operating": {
+          "name": "join_requires_operating",
+          "value": "NOT join_open OR operating"
+        },
+        "next_code_seq_is_not_negative": {
+          "name": "next_code_seq_is_not_negative",
+          "value": "next_code_seq >= 0"
+        }
+      }
+    },
+    "zones": {
+      "name": "zones",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "venue_id": {
+          "name": "venue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sort": {
+          "name": "sort",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "zones_venue": {
+          "name": "zones_venue",
+          "columns": [
+            "venue_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "zones_venue_id_venues_id_fk": {
+          "name": "zones_venue_id_venues_id_fk",
+          "tableFrom": "zones",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
