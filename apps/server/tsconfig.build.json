@@ -10,5 +10,7 @@
 
   // **本番に持っていかないものは、組み立てない。** あとから消すより、
   // 最初から作らないほうが確かである（`infra/Dockerfile`）。
-  "exclude": ["**/*.test.ts", "db/fixtures.ts"]
+  //
+  // `exclude` は親と混ざらないので、親のぶんもここに書く。
+  "exclude": ["dist", "drizzle.config.ts", "**/*.test.ts", "db/fixtures.ts"]
 }

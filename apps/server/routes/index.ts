@@ -19,6 +19,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import type { Deps } from './deps.js';
 import { accessLog, type Sink } from './log.js';
 import { sameOriginOnly } from './origin.js';
+import { streamRoutes } from './stream.js';
 import { ticketRoutes } from './tickets.js';
 import { venueRoutes } from './venue.js';
 
@@ -29,7 +30,7 @@ import { venueRoutes } from './venue.js';
  */
 export const API_PREFIX = '/api/';
 
-/** 利用者の API（9.7 の 1〜3・6）。座席 QR は PR 10、ボードは PR 11。 */
+/** 利用者の API（9.7 の 1〜3・6）と配信（9.5）。座席 QR は PR 10、ボードは PR 11。 */
 export function api(deps: Deps, sink?: Sink): Hono {
   const app = new Hono();
   // **守りは API の道にだけ付ける。** このアプリは画面と同じ入口に載るので
@@ -40,6 +41,7 @@ export function api(deps: Deps, sink?: Sink): Hono {
   app.use(under, sink === undefined ? accessLog() : accessLog(sink, deps.clock));
   app.route('/', ticketRoutes(deps));
   app.route('/', venueRoutes(deps));
+  app.route('/', streamRoutes(deps));
   return app;
 }
 

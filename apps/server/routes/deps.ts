@@ -9,6 +9,7 @@
 
 import type { Timestamp, VenueState } from '@openseat/core';
 import type { VenueActor } from '../venue/actor.js';
+import type { Watcher } from '../stream/hub.js';
 
 /** 名前で引き当てた施設。 */
 export interface VenueHandle {
@@ -44,6 +45,12 @@ export interface Deps {
    * 読まずに他人の席を指せてしまう。
    */
   readonly findTable: (venueId: string, token: string) => string | null;
+  /**
+   * 配信を見はじめる（9.5、[ADR-0018](../../../docs/adr/0018-server-sent-events.md)）。
+   *
+   * **その場で 1 通目が届く。** 返るのは見おわるための手続き。
+   */
+  readonly watch: (venueId: string, watcher: Watcher) => () => void;
   /** 施設が引けなかったときの文言に使う。 */
   readonly defaultLocale: string;
 }

@@ -19,6 +19,7 @@ import {
 import { api } from '../routes/index.js';
 import type { Sink } from '../routes/log.js';
 import type { Deps, TicketHandle, VenueHandle } from '../routes/deps.js';
+import type { Hub } from '../stream/hub.js';
 import { mayJoin } from '../venue/rate-limit.js';
 import type { Registry } from '../venue/registry.js';
 
@@ -26,6 +27,8 @@ export interface ApiParams {
   readonly db: Db;
   readonly registry: Registry;
   readonly clock: () => Timestamp;
+  /** 配信（9.5）。**変化を配るのは `main.ts` が繋ぐ。** */
+  readonly hub: Hub;
 }
 
 /** 利用者の API（9.7）。 */
@@ -38,6 +41,7 @@ export function depsOf(params: ApiParams): Deps {
     clock: params.clock,
     newId: () => randomUUID(),
     defaultLocale: 'ja',
+    watch: (venueId, watcher) => params.hub.watch(venueId, watcher),
     findVenue: (slug) => bySlug(params, slug),
     findTicket: (ticketId) => byTicket(params, ticketId),
     findTable: (venueId, token) => tableByToken(params.db, venueId, token),

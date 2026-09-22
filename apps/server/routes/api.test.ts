@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '../db/client.js';
 import { harness, seed, type Harness } from '../db/fixtures.js';
 import { userApi } from '../src/api.js';
+import { openHub } from '../stream/hub.js';
 import { openRegistry } from '../venue/registry.js';
 import { CLIENT_HEADER } from './identity.js';
 import type { AccessRecord } from './log.js';
@@ -41,7 +42,7 @@ beforeEach(() => {
   seed(db, { capacities: [2, 4], now: OPENED });
   logged = [];
   app = userApi(
-    { db, registry: openRegistry({ db, clock: () => now }), clock: () => now },
+    { db, registry: openRegistry({ db, clock: () => now }), clock: () => now, hub: openHub() },
     (record) => logged.push(record),
   );
 });

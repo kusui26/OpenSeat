@@ -14,6 +14,7 @@ import { COMMAND_TYPES, type CommandType } from '@openseat/core';
 import type { z } from 'zod';
 import type { ApiErrorCode } from './errors.js';
 import * as admin from './admin.js';
+import * as stream from './stream.js';
 import * as staff from './staff.js';
 import * as tables from './tables.js';
 import * as tickets from './tickets.js';
@@ -60,6 +61,13 @@ export interface RouteSpec {
   readonly from: PlanRow;
   /** 9.7 に無い入口なら、足した理由。 */
   readonly added?: string;
+  /**
+   * 開きっぱなしにして流し続ける入口か（SSE。9.5、[ADR-0018](../../../../docs/adr/0018-server-sent-events.md)）。
+   *
+   * **応答の種別が違う。** 1 回の JSON ではなく `text/event-stream` を返し、
+   * `response` は**流れてくる 1 通の形**を表す。
+   */
+  readonly stream?: boolean;
 
   readonly params: z.ZodObject | null;
   readonly query: z.ZodObject | null;
@@ -208,6 +216,45 @@ export const ROUTES: readonly RouteSpec[] = [
     headers: null,
     request: null,
     response: venue.VenueStatusResponse,
+    errors: NOT_FOUND,
+    commands: [],
+  },
+
+  // ---- 配信（9.5、ADR-0018） ----
+  //
+  // **流すのは「起きたこと」ではなく「いまの姿」である。** 1 回で取るときと
+  // まったく同じ形が流れてくるので、画面は同じ描き方を使い回せる。
+  {
+    id: 'ticketStream',
+    method: 'GET',
+    path: '/api/t/{ticket}/stream',
+    summary: 'チケットの状態を受け取り続ける',
+    audience: 'user',
+    from: 'user.ticket',
+    added: '9.7 の表には無い。9.5 が求める配信を、SSE の入口として開いたもの（ADR-0018）',
+    stream: true,
+    params: tickets.TicketPath,
+    query: tickets.TicketQuery,
+    headers: null,
+    request: null,
+    response: stream.TicketStreamMessage,
+    errors: ['TICKET_NOT_FOUND', 'UNAUTHORIZED'],
+    commands: [],
+  },
+  {
+    id: 'venueStream',
+    method: 'GET',
+    path: '/api/v/{venue}/stream',
+    summary: '施設の混み具合を受け取り続ける',
+    audience: 'user',
+    from: 'user.status',
+    added: '9.7 の表には無い。9.5 が求める配信を、SSE の入口として開いたもの（ADR-0018）',
+    stream: true,
+    params: venue.VenuePath,
+    query: venue.VenueStatusQuery,
+    headers: null,
+    request: null,
+    response: stream.VenueStreamMessage,
     errors: NOT_FOUND,
     commands: [],
   },
@@ -384,8 +431,7 @@ export const LATER_ROUTES: readonly {
   readonly from: PlanRow | null;
   readonly when: string;
 }[] = [
-  { path: 'WS /api/v/{venue}/board', from: 'board', when: 'PR 7（配信。ADR-0014 で方式を決める）' },
-  { path: 'WS /api/t/{ticket}', from: 'user.ticket', when: 'PR 7（本人の画面への配信）' },
+  { path: 'GET /api/v/{venue}/stream?topic=staff', from: null, when: 'PR 12（スタッフへの配信）。**認証が要るので、いまは開けない**（ADR-0018）' },
   { path: 'POST /api/t/{ticket}/notifications', from: 'user.join', when: 'PR 16（通知）。9.7 は受付に含めているが、Web Push の購読は許可を求めたあとにしか取れない' },
   { path: 'GET /api/admin/v/{venue}/print/tables.pdf', from: 'admin', when: 'PR 13（QR 印刷）' },
   { path: 'GET/PUT /api/admin/v/{venue}/layout', from: 'admin', when: 'Phase 3（フロア図）' },

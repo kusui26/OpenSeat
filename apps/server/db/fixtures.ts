@@ -93,6 +93,18 @@ function seats(capacities: readonly number[], now: Timestamp): readonly Table[] 
 }
 
 /** 施設と席を作り、その状態を返す。 */
+/**
+ * 席のトークン。
+ *
+ * **契約（`TableToken`）を満たす形にしておく。** 本物は推測不能な乱数だが
+ * （CLAUDE.md 7 章）、テストでは席の番号から作れるほうが読みやすい。**長さと
+ * 使える文字だけは本物に揃える** —— 揃えないと、契約を通る道（座席 QR。PR 10）で
+ * 初めて弾かれ、原因がフィクスチャ側にあることに気づけない。
+ */
+export function seatToken(seat: number): string {
+  return `seat${String(seat).padStart(2, '0')}token0123456789`;
+}
+
 export function seed(db: Db, params: SeedParams): VenueState {
   const tables: readonly Table[] = seats(params.capacities, params.now);
   const state = createVenueState({
@@ -103,7 +115,7 @@ export function seed(db: Db, params: SeedParams): VenueState {
 
   createVenue(db, { state, slug: 'test', name: 'テスト施設', now: params.now });
   tables.forEach((table, index) => {
-    insertTable(db, table, { venueId: VENUE_ID, zoneId: null, token: `token-${String(index + 1)}` });
+    insertTable(db, table, { venueId: VENUE_ID, zoneId: null, token: seatToken(index + 1) });
   });
   return state;
 }

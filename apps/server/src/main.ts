@@ -23,6 +23,7 @@ import { open, type Connection } from '../db/client.js';
 import { loadVenueState, migrationCount } from '../db/repository.js';
 import { TickFailed, type VenueActor } from '../venue/actor.js';
 import { openRegistry, type Registry } from '../venue/registry.js';
+import { openHub, type Hub } from '../stream/hub.js';
 import { buildApp, type Health } from './app.js';
 import { readConfig, type Config } from './config.js';
 import { ensureVenue } from './seed.js';
@@ -45,11 +46,34 @@ console.log(
 );
 
 /**
+ * 配信（9.5、[ADR-0018](../../../docs/adr/0018-server-sent-events.md)）。
+ *
+ * **記録が終わってから配る。** アクターが同じトランザクションで書き終えたあとに
+ * 知らせてくるので、**まだ書かれていない姿を先に見せてしまうことがない**（9.4）。
+ *
+ * 1 人の組み立てが失敗しても、ほかへの配信は止めない。**ただし黙って捨てない。**
+ */
+const hub: Hub = openHub({
+  onTrouble: (error: unknown) => {
+    console.error('配信の組み立てで失敗:', error);
+  },
+});
+
+/**
  * 施設ごとに 1 つのアクター（9.4）。
  *
  * **起動時の復元は、最初に引いたときに終わる。** 行から状態を組み立てる（ADR-0013）。
  */
-const registry: Registry = openRegistry({ db: connection.db, clock: () => Date.now() });
+const registry: Registry = openRegistry({
+  db: connection.db,
+  clock: () => Date.now(),
+  // **起こすたびに配信へ繋ぐ**（9.5）。あとから引かれた施設を取りこぼさない。
+  onOpen: (opened) => {
+    opened.onCommitted(() => {
+      hub.wake(opened.venueId);
+    });
+  },
+});
 const actor: VenueActor = mustFind(config.venueId);
 
 function mustFind(slug: string): VenueActor {
@@ -107,6 +131,8 @@ function health(now: number): Health {
     tickLagMs: lastTick === null ? null : now - lastTick,
     /** 刻みが断られた回数。**0 でないなら実装の誤りが出ている。** */
     tickFailures: actor.tickFailures(),
+    /** いま画面を開いている数（CLAUDE.md 8 の監視）。 */
+    connections: hub.watching(),
   };
 }
 
@@ -129,6 +155,7 @@ const app: Hono = buildApp({
   registry,
   clock: () => Date.now(),
   web,
+  hub,
   health,
 });
 

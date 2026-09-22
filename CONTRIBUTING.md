@@ -142,6 +142,20 @@ pnpm --filter @openseat/web build    # 組み上げる（型検査 → Vite）
 
 **部品の一式（shadcn/ui など）は入れていません。** ボタンとステッパーしか無い段階で依存を増やすより、素の要素のほうが支援技術との相性がよいためです。画面が増える PR 13・14 で改めて判断します。
 
+### 配信
+
+[`apps/server/routes/stream.ts`](apps/server/routes/stream.ts) と [`apps/server/stream/hub.ts`](apps/server/stream/hub.ts)、画面側は [`apps/web/src/live.ts`](apps/web/src/live.ts) にあります（[開発プラン 9.5](docs/260916_plan_OpenSeat.md)、[ADR-0018](docs/adr/0018-server-sent-events.md)）。
+
+**SSE 1 本で配り、つながらないあいだは 5 秒ごとに取りに行きます。**
+
+- **流すのはイベントではなく「いまの姿」です。** `GET` で取るのとまったく同じ形が届くので、画面は描き替えるだけで済みます。イベントを流すと**画面が状態機械を持つ**ことになります（[CLAUDE.md 3.1](.claude/CLAUDE.md)）
+- **つないだ直後に必ず現在の姿が 1 通届きます。** だから「どこから追いつくか」を決める必要がありません
+- **前と同じ姿は送りません。** 比べる鍵から `serverNow` を外してあります —— 外さないと、時計が動いただけで「変わった」ことになり、呼び出しが 1 件あるたびに関係のない数百台が起きます
+- 心拍（7.9 の放置判定）は **`send` ではなく `touch`** で送ります。控えも取らず、配信も起こしません（どちらも接続の数だけ無駄が積み上がるため）
+- **スタッフ向けの配信は PR 12（認証）からです。** `hub` はトピックを知らない作りなので、口を 1 つ足せば入ります
+
+姿の組み立ては [`routes/views.ts`](apps/server/routes/views.ts) に集めてあります。**`GET` と配信が同じ関数を通る**ので、片方だけが違う姿を返すことがありません。
+
 ### サーバが画面を配る
 
 **成果物は 1 つのコンテナのままです**（[ADR-0005](docs/adr/0005-single-container-sqlite.md)）。`apps/web` の組み上がりを `apps/server` が配ります（`WEB_DIR`。既定は `../web/dist`、コンテナでは `/app/web`）。

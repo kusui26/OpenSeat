@@ -11,7 +11,7 @@
  * |---|---|---|
  * | `/healthz` | 監視と通し確認 | **ある。** 画面より先でなければならない |
  * | 画面 | `/api/` 以外のすべて（9.2） | —— |
- * | API | `/api/` の下（9.7） | 無い。画面が `/api/` に触れない |
+ * | API と配信 | `/api/` の下（9.7、9.5） | 無い。画面が `/api/` に触れない |
  *
  * **`/healthz` が先でなければならない理由。** 画面はどの道も 1 枚目に落とす
  * （SPA）。あとに置くと、ブラウザから `/healthz` を開いたとき（`Accept:
@@ -23,6 +23,7 @@ import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Timestamp } from '@openseat/core';
 import type { Db } from '../db/client.js';
+import type { Hub } from '../stream/hub.js';
 import type { Registry } from '../venue/registry.js';
 import { userApi } from './api.js';
 
@@ -43,6 +44,8 @@ export interface AppParams {
   readonly clock: () => Timestamp;
   /** 組み上がった画面（[`webApp`](web.ts)）。**無ければ配らない。** */
   readonly web: Hono | null;
+  /** 配信（9.5）。**変化をここへ渡すのは `main.ts`。** */
+  readonly hub: Hub;
   readonly health: (now: Timestamp) => Health;
 }
 
@@ -50,7 +53,10 @@ export function buildApp(params: AppParams): Hono {
   const app = new Hono();
   mountHealth(app, params);
   if (params.web !== null) app.route('/', params.web);
-  app.route('/', userApi({ db: params.db, registry: params.registry, clock: params.clock }));
+  app.route(
+    '/',
+    userApi({ db: params.db, registry: params.registry, clock: params.clock, hub: params.hub }),
+  );
   return app;
 }
 

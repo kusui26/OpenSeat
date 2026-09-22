@@ -23,6 +23,14 @@ export interface Registry {
 export interface OpenRegistryParams {
   readonly db: Db;
   readonly clock: () => number;
+  /**
+   * 施設を起こしたときに呼ばれる。
+   *
+   * **ここで繋がなければ、あとから開いた施設だけ配信されない。** アクターは
+   * 引かれたときに初めて起きるので（下記）、起動時に並んでいるものへ繋いで
+   * 回るやり方では取りこぼす。
+   */
+  readonly onOpen?: (actor: VenueActor) => void;
 }
 
 export function openRegistry(params: OpenRegistryParams): Registry {
@@ -37,6 +45,7 @@ export function openRegistry(params: OpenRegistryParams): Registry {
 
     const opened: VenueActor = openVenueActor({ db: params.db, venueId, clock: params.clock });
     byId.set(venueId, opened);
+    params.onOpen?.(opened);
     return opened;
   };
 
