@@ -52,11 +52,26 @@ class FakeSocket implements Socket {
 const KEY: readonly unknown[] = ['probe'];
 
 let socket: FakeSocket;
+/** 張られた接続の数。**描き直しのたびに増えてはいけない。** */
+let connections: number;
+
+/** **描くたびに作り直さない**（`useLive` の約束）。ここで作り直すと、測れない。 */
+function openSocket(): FakeSocket {
+  connections += 1;
+  return socket;
+}
 /** 取りに行った回数。**つながっているあいだは増えないはず。** */
 let fetched: number;
 
 function Probe({ url }: { readonly url: string | null }): React.JSX.Element {
-  const live: boolean = useLive({ url, event: 'shown', checks: CHECKS, queryKey: KEY, open: () => socket });
+  const live: boolean = useLive({
+    url,
+    event: 'shown',
+    // **どちらも、描くたびに作り直される。** 繋ぎ直しの理由にしてはいけない。
+    checks: CHECKS,
+    queryKey: [...KEY],
+    open: openSocket,
+  });
   const shown = useQuery({
     ...LIVE_QUERY,
     queryKey: KEY,
@@ -85,6 +100,7 @@ function show(url: string | null = '/api/probe/stream'): void {
 beforeEach(() => {
   socket = new FakeSocket();
   fetched = 0;
+  connections = 0;
 });
 
 afterEach(() => {
@@ -105,6 +121,21 @@ describe('届いたとき', () => {
     show();
     socket.fire('{"serverNow":200,"label":"届いた"}');
     await screen.findByText(/つながっている/);
+  });
+});
+
+describe('繋ぎ直し', () => {
+  it('描き直しても、接続は 1 本のまま', async () => {
+    // **届いた 1 通が描き直しを起こし、それがまた繋ぎ直しを起こす**、という輪に
+    // なりやすい。実際になっていた —— 1 つの筋書きで 127 本張られていた（PR 8）。
+    show();
+    await screen.findByText(/取りに行った/);
+
+    for (const at of [200, 300, 400, 500]) {
+      socket.fire(`{"serverNow":${String(at)},"label":"${String(at)}"}`);
+      await screen.findByText(new RegExp(String(at)));
+    }
+    expect(connections).toBe(1);
   });
 });
 

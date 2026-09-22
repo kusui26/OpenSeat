@@ -1,0 +1,36 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // `rootDir` は置かない。**何も出さないので要らず**、置くと「元のソースが
+    // 外にある」（参照した先のこと）と言って落ちる。
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+
+    // ここは境界である。サーバを起こし、ファイルを開き、プロセスの合図を受ける。
+    "types": ["node"],
+
+    // **Node がそのまま走らせる**（22 の型剥がし）。だから拡張子まで書く。
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true
+  },
+
+  // **置き場所を数え上げない**（`apps/server/tsconfig.json` と同じ理由）。
+  "include": ["**/*.ts"],
+  "exclude": ["test-results", "playwright-report"],
+
+  // **参照しておかないと、綺麗なチェックアウトで型が引けない。**
+  //
+  // ハーネスはサーバの組み上がり（`dist`）を読み込む —— 元のソースには、Node の
+  // 型剥がしが扱えない書き方（コンストラクタの引数プロパティ）が含まれるためで
+  // ある。その `dist` は組み立てないと存在しないので、**参照して元のソースへ
+  // 回してもらう。** 参照が無いと、lint が「型が分からない」と言って落ちる
+  // （実際に CI で落ちた）。
+  "references": [
+    { "path": "../packages/core/tsconfig.build.json" },
+    { "path": "../packages/shared/tsconfig.build.json" },
+    { "path": "../apps/server/tsconfig.build.json" }
+  ]
+}

@@ -16,7 +16,7 @@
   "packageManager": "pnpm@11.10.0",
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json && tsc -p packages/core/tsconfig.sim.json --noEmit && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json && tsc -p packages/core/tsconfig.sim.json --noEmit && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "sim": "tsc -p packages/core/tsconfig.sim.json && node packages/core/dist-sim/sim/main.js",
@@ -26,7 +26,8 @@
     "check:links": "node scripts/check-doc-links.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:arch && pnpm check:links",
     "clean": "tsc --build --clean",
-    "build": "tsc --build"
+    "build": "tsc --build",
+    "build:apps": "pnpm --filter @openseat/core build && pnpm --filter @openseat/shared build && pnpm --filter @openseat/server build && pnpm --filter @openseat/web build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
