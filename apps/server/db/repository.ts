@@ -32,7 +32,7 @@ import {
   type Timestamp,
   type VenueState,
 } from '@openseat/core';
-import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, lt, max, sql } from 'drizzle-orm';
 import type { Db } from './client.js';
 import {
   decodeVenueState,
@@ -379,16 +379,42 @@ export function insertTable(db: Db, table: Table, keys: TableKeys): void {
  * 二重防御であって代替ではないからで（CLAUDE.md 3.2(1)）、ここで落ちたら
  * **その変更は丸ごと捨てられる**。壊れた状態が残るより、書けないほうがよい。
  */
-export function commit(db: Db, change: Commit): void {
-  db.transaction((tx) => {
+export function commit(db: Db, change: Commit): Committed {
+  return db.transaction((tx) => {
     ensureSeatsUnchanged(change);
     writeTables(tx, change);
     writeTickets(tx, change);
     writeVenue(tx, change);
-    writeEvents(tx, change);
+    const lastSeq: number | null = writeEvents(tx, change);
     writeSpans(tx, change);
     writeRecord(tx, change);
+    return { lastSeq };
   });
+}
+
+/**
+ * 記録の結果。
+ *
+ * `lastSeq` は**このとき書いた最後のイベントの位置**で、イベントが 1 つも
+ * 出なかったなら `null`。配信はこれを版として使う（9.5、ADR-0018）。
+ */
+export interface Committed {
+  readonly lastSeq: number | null;
+}
+
+/**
+ * その施設の、いちばん新しいイベントの位置。
+ *
+ * **起動したときの版を決める**のに使う。イベントが 1 つも無ければ `0` ——
+ * 「まだ何も起きていない」を表す版である。
+ */
+export function lastEventSeq(db: Db, venueId: string): number {
+  const found = db
+    .select({ seq: max(events.seq) })
+    .from(events)
+    .where(eq(events.venueId, venueId))
+    .get();
+  return found?.seq ?? 0;
 }
 
 function writeRecord(tx: Tx, change: Commit): void {
@@ -542,11 +568,20 @@ function withoutKeys(
  */
 const EVENTS_PER_STATEMENT = 200;
 
-function writeEvents(tx: Tx, change: Commit): void {
+/**
+ * 起きたことを書く。**書いた最後の位置を返す**（配信の版になる。9.5）。
+ *
+ * `seq` は `integer primary key autoincrement` なので、SQLite の行番号
+ * そのものである。**最後の 1 文で入った行番号が、そのまま最後の位置になる。**
+ */
+function writeEvents(tx: Tx, change: Commit): number | null {
   const rows = change.events.map((event) => eventRow(change, event));
+  let lastSeq: number | null = null;
   for (let from = 0; from < rows.length; from += EVENTS_PER_STATEMENT) {
-    tx.insert(events).values(rows.slice(from, from + EVENTS_PER_STATEMENT)).run();
+    const written = tx.insert(events).values(rows.slice(from, from + EVENTS_PER_STATEMENT)).run();
+    lastSeq = Number(written.lastInsertRowid);
   }
+  return lastSeq;
 }
 
 function eventRow(change: Commit, event: DomainEvent): typeof events.$inferInsert {

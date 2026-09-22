@@ -12,7 +12,7 @@ import { minutes } from '@openseat/core';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from './client.js';
-import { harness, seed, VENUE_ID, type Harness } from './fixtures.js';
+import { harness, seatToken, seed, VENUE_ID, type Harness } from './fixtures.js';
 import { tableStatusLog, tables, tickets, venues } from './schema.js';
 
 const NOW = Date.UTC(2027, 2, 6, 3, 0, 0);
@@ -187,7 +187,7 @@ describe('席の表が断るもの', () => {
         .values({
           id: 't-3',
           venueId: VENUE_ID,
-          token: 'token-3',
+          token: seatToken(3),
           label: 'T-01',
           capacity: 2,
           status: 'DISABLED',
@@ -204,7 +204,7 @@ describe('席の表が断るもの', () => {
         .values({
           id: 't-3',
           venueId: VENUE_ID,
-          token: 'token-1',
+          token: seatToken(1),
           label: 'T-03',
           capacity: 2,
           status: 'DISABLED',

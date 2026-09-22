@@ -44,6 +44,7 @@ import type { Db } from '../db/client.js';
 import {
   commit,
   findRecord,
+  lastEventSeq,
   loadVenueState,
   pruneRecords,
   recordRejection,
@@ -85,8 +86,24 @@ export type CommandOutcome =
   /** 同じ鍵をすでに受け取っていた。**適用していない。** */
   | { readonly kind: 'replayed'; readonly record: CommandRecord };
 
-/** 記録が終わったあとに呼ばれる。**配信はここから先の仕事**（PR 7）。 */
-export type Committed = (events: readonly DomainEvent[], state: VenueState) => void;
+/**
+ * 記録が終わった 1 回ぶん。
+ *
+ * **配信（9.5）も通知（PR 16）も、ここから先を読む。**
+ */
+export interface Change {
+  readonly events: readonly DomainEvent[];
+  readonly state: VenueState;
+  /**
+   * いまの版（9.5、[ADR-0018](../../../docs/adr/0018-server-sent-events.md)）。
+   *
+   * 最後に書いたイベントの位置。**イベントが出なければ 1 つ前のまま**である。
+   */
+  readonly revision: number;
+}
+
+/** 記録が終わったことを知らせる。 */
+export type Committed = (change: Change) => void;
 
 export interface VenueActor {
   readonly venueId: string;
@@ -94,10 +111,32 @@ export interface VenueActor {
   readonly state: () => VenueState;
   /** コマンドを 1 件、順番に適用する。 */
   readonly send: (request: CommandRequest) => Promise<CommandOutcome>;
+  /**
+   * 画面が開いていることを伝える（9.5、7.9 の放置判定）。
+   *
+   * **`send` と分けてある。** 心拍は操作ではなく、生きている合図だからである。
+   * 扱いが 2 つ違う。
+   *
+   * - **控えを取らない。** 控え（[ADR-0015](../../../docs/adr/0015-idempotency-key.md)）は
+   *   二度適用すると困るもののためにある。心拍は何度届いても結果が同じで、
+   *   守るものが無い
+   * - **配信を起こさない。** 心拍が変えるのは `lastSeenAt` だけで、これは
+   *   誰の画面にも現れない（放置の判定にしか使わない。7.9）
+   *
+   * 数十秒ごとに**全接続から**届くので、どちらも開けておくと、接続の数だけ
+   * 無駄が積み上がる。控えは `command_log` を埋め、配信は接続数の二乗で
+   * 仕事を増やす。
+   *
+   * **断りは投げない。** 終わったチケットの画面が開いたままでも、心拍が
+   * 通らないだけで何も起きてほしくない。
+   */
+  readonly touch: (actor: Actor, ticketId: string) => Promise<void>;
   /** 時刻を進める。10 秒ごとに呼ぶ（9.4）。 */
   readonly advance: () => Promise<void>;
   /** 記録が終わったことを知らせてもらう。 */
   readonly onCommitted: (listener: Committed) => void;
+  /** いまの版（9.5）。**つないだ相手に、どこまで見たかを伝える。** */
+  readonly revision: () => number;
   /**
    * 最後に**うまく**時刻を進めた実時刻。**監視が `tick` の遅れを見る**（CLAUDE.md 8）。
    *
@@ -122,16 +161,20 @@ class Venue {
   state: VenueState;
   lastTick: Timestamp | null = null;
   failures = 0;
+  /** いまの版（9.5）。**イベントを書くたびに進む。** */
+  revision: number;
 
   private lastPrune: Timestamp | null = null;
   private readonly listeners: Committed[] = [];
 
   constructor(
     private readonly db: Db,
-    private readonly venueId: string,
+    readonly id: string,
     restored: VenueState,
+    revision: number,
   ) {
     this.state = restored;
+    this.revision = revision;
   }
 
   listen(listener: Committed): void {
@@ -140,7 +183,7 @@ class Venue {
 
   /** コマンドを 1 件。**控えを見てから適用する。** */
   apply(request: CommandRequest, now: Timestamp): CommandOutcome {
-    const seen: CommandRecord | null = findRecord(this.db, this.venueId, request.key);
+    const seen: CommandRecord | null = findRecord(this.db, this.id, request.key);
     if (seen !== null) return { kind: 'replayed', record: seen };
 
     const decided = dispatch(this.state, request.actor, request.command, now);
@@ -175,7 +218,7 @@ class Venue {
    */
   private refuse(request: CommandRequest, rejection: Rejection, now: Timestamp): CommandOutcome {
     if (!isDefect(rejection)) {
-      recordRejection(this.db, this.venueId, recordOf(request, false, rejection.code, now));
+      recordRejection(this.db, this.id, recordOf(request, false, rejection.code, now));
     }
     return { kind: 'rejected', rejection };
   }
@@ -186,7 +229,7 @@ class Venue {
     this.prune(now);
     if (!decided.ok) {
       this.failures += 1;
-      throw new TickFailed(this.venueId, decided.error);
+      throw new TickFailed(this.id, decided.error);
     }
     this.lastTick = now;
     if (decided.value.events.length === 0 && decided.value.state === this.state) return;
@@ -200,19 +243,54 @@ class Venue {
     });
   }
 
+  /**
+   * 画面が開いていることを記録する（9.5、7.9）。
+   *
+   * **控えも取らず、知らせも出さない**（`VenueActor.touch` に理由がある）。
+   * 断られても黙って捨てる —— 終わったチケットの画面が開いたままでも、
+   * ここで何かが起きてほしくない。
+   */
+  sign(actor: Actor, ticketId: string, now: Timestamp): void {
+    const decided = dispatch(this.state, actor, { type: 'HEARTBEAT', ticketId }, now);
+    if (!decided.ok) return;
+    this.store(decided.value.state, decided.value.events, null, now, null, null);
+    this.state = decided.value.state;
+  }
+
   /** 記録してから配信する。**順番を入れ替えない**（9.4）。 */
   private write(change: Written): void {
-    commit(this.db, {
-      before: this.state,
-      after: change.next,
-      events: change.events,
-      actor: change.actor,
-      at: change.now,
-      record: change.record,
-      identity: change.identity,
-    });
+    const seq: number | null = this.store(
+      change.next,
+      change.events,
+      change.actor,
+      change.now,
+      change.record,
+      change.identity,
+    );
     this.state = change.next;
-    for (const listener of this.listeners) listener(change.events, change.next);
+    if (seq !== null) this.revision = seq;
+    const told: Change = { events: change.events, state: change.next, revision: this.revision };
+    for (const listener of this.listeners) listener(told);
+  }
+
+  /** 1 つのトランザクションに収める。**書いた最後のイベントの位置を返す。** */
+  private store(
+    next: VenueState,
+    events: readonly DomainEvent[],
+    actor: Actor | null,
+    now: Timestamp,
+    record: CommandRecord | null,
+    identity: TicketIdentity | null,
+  ): number | null {
+    return commit(this.db, {
+      before: this.state,
+      after: next,
+      events,
+      actor,
+      at: now,
+      record,
+      identity,
+    }).lastSeq;
   }
 
   /** 古い控えを捨てる（24 時間。ADR-0015）。 */
@@ -250,22 +328,32 @@ export function openVenueActor(params: OpenActorParams): VenueActor {
   const restored: VenueState | null = loadVenueState(params.db, params.venueId);
   if (restored === null) throw new Error(`施設 ${params.venueId} が見つかりません`);
 
-  const venue = new Venue(params.db, params.venueId, restored);
-  const queue = serialiser();
+  const seq: number = lastEventSeq(params.db, params.venueId);
+  return serve(new Venue(params.db, params.venueId, restored, seq), params.clock);
+}
 
+/**
+ * 持ち物を、外から触れる形にする。
+ *
+ * **入口はすべて列を通る**（`serialiser`）。読むだけのものは通さない ——
+ * 待たせる理由が無く、いちばん新しいものが欲しいだけだからである。
+ */
+function serve(venue: Venue, clock: () => Timestamp): VenueActor {
+  const queue = serialiser();
+  /** 返しの要らないものを、列に積む。 */
+  const run = (work: () => void): Promise<void> => queue(work);
   return {
-    venueId: params.venueId,
+    venueId: venue.id,
     state: () => venue.state,
-    send: (request) => queue(() => venue.apply(request, params.clock())),
-    advance: () =>
-      queue(() => {
-        venue.advance(params.clock());
-      }),
+    revision: () => venue.revision,
+    lastTickAt: () => venue.lastTick,
+    tickFailures: () => venue.failures,
     onCommitted: (listener) => {
       venue.listen(listener);
     },
-    lastTickAt: () => venue.lastTick,
-    tickFailures: () => venue.failures,
+    send: (request) => queue(() => venue.apply(request, clock())),
+    touch: (actor, ticketId) => run(() => venue.sign(actor, ticketId, clock())),
+    advance: () => run(() => venue.advance(clock())),
   };
 }
 

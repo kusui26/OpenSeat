@@ -7,17 +7,28 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
-import type { VenueStatusResponse } from '@openseat/shared';
+import { STREAM_FALLBACK_POLL_MS, VenueStatusResponse } from '@openseat/shared';
 import { venueStatus } from '../api.ts';
 import { Notice, Problem, Screen } from '../components/layout.tsx';
 import { t, tError } from '../i18n.ts';
+import { LIVE_QUERY, useLive } from '../use-live.ts';
 
 export function StatusScreen(): React.JSX.Element {
   const venue: string = useParams()['venue'] ?? '';
+  const key: readonly unknown[] = ['status', venue];
+
+  const live: boolean = useLive({
+    url: `/api/v/${encodeURIComponent(venue)}/stream`,
+    event: 'venue',
+    checks: VenueStatusResponse,
+    queryKey: key,
+  });
+
   const shown = useQuery({
-    queryKey: ['status', venue],
+    ...LIVE_QUERY,
+    queryKey: key,
     queryFn: () => venueStatus(venue),
-    refetchInterval: 15_000,
+    refetchInterval: live ? false : STREAM_FALLBACK_POLL_MS,
   });
 
   return (

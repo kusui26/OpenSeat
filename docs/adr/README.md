@@ -28,6 +28,7 @@
 | [0015](0015-idempotency-key.md) | 冪等キーは画面が作り、控えるのは応答ではなく結末とする | Accepted | 2026-09-22 |
 | [0016](0016-serving-the-app.md) | 画面は API と同じ入口から配り、CSP と置き場の期限を道ごとに分ける | Accepted | 2026-09-22 |
 | [0017](0017-no-component-library-yet.md) | 画面の部品一式（shadcn/ui）は入れず、素の要素で作る | Accepted | 2026-09-22 |
+| [0018](0018-server-sent-events.md) | 配信は SSE 1 本にし、流すのはイベントではなく「いまの姿」とする | Accepted | 2026-09-22 |
 
 ## テンプレート
 

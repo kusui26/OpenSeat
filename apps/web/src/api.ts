@@ -22,7 +22,7 @@ import { clientToken, newIdempotencyKey } from './device.ts';
  * ここで `zod` を直に import すると、**画面が契約の実装に縛られる。** 使うのは
  * 「確かめて中身を出す」という 1 つの働きだけである。
  */
-interface Checks<T> {
+export interface Checks<T> {
   readonly safeParse: (value: unknown) => { readonly success: true; readonly data: T } | { readonly success: false };
 }
 

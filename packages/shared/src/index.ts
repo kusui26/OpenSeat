@@ -14,6 +14,7 @@ export * from './api/views.js';
 export * from './api/tickets.js';
 export * from './api/tables.js';
 export * from './api/venue.js';
+export * from './api/stream.js';
 export * from './api/staff.js';
 export * from './api/admin.js';
 export * from './api/catalog.js';

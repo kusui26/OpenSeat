@@ -94,6 +94,45 @@ CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/t/${TICKET}?k=wrong-
 [ "$CODE" = "403" ] || fail "他人がチケットを読めてしまう（$CODE）"
 echo "OK  他人は読めない"
 
+# ---- 配信（9.5、ADR-0018） ----
+#
+# **つないだ直後に、現在の姿が 1 通届くこと。** ここが動かないと、呼び出しが
+# 画面に出るまで最大 5 秒かかる（退避のポーリング頼みになる）。
+
+# 最初の 1 通だけ読んで切る。
+#
+# **開きっぱなしの入口なので、待ち時間で打ち切る。** そのとき curl は 28 で
+# 終わるが、それは異常ではない —— `set -o pipefail` に拾わせないよう握る。
+# **中身が空なら、下の照合が落とす。**
+first_frame() {
+  curl -fsS --max-time 3 -N -H 'accept: text/event-stream' "${BASE}$1" 2>/dev/null | head -4 || true
+}
+
+FRAME="$(first_frame "/api/v/smoke/stream")"
+case "$FRAME" in
+  *"event: venue"*) echo "OK  施設の配信が、つないだ直後に届く" ;;
+  *) fail "施設の配信が届かない（$FRAME）" ;;
+esac
+case "$FRAME" in
+  *'"managedTables"'*) echo "OK  配信の中身が契約どおり" ;;
+  *) fail "配信の中身が契約と違う" ;;
+esac
+
+FRAME="$(first_frame "/api/t/${TICKET}/stream?k=${SECRET}")"
+case "$FRAME" in
+  *"event: ticket"*) echo "OK  本人の配信が、つないだ直後に届く" ;;
+  *) fail "本人の配信が届かない（$FRAME）" ;;
+esac
+# **秘密は流れてこない**（9.8）。
+case "$FRAME" in
+  *"$SECRET"*) fail "配信に秘密パラメータが混ざっている" ;;
+esac
+echo "OK  配信に秘密は混ざっていない"
+
+CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${BASE}/api/t/${TICKET}/stream?k=wrong-secret-000000")"
+[ "$CODE" = "403" ] || fail "他人が配信につなげてしまう（$CODE）"
+echo "OK  他人は配信につなげない"
+
 # ---- 画面（9.2） ----
 #
 # **同じコンテナから画面も配られること。** ここが空だと、施設は Docker を 2 つ
@@ -142,6 +181,10 @@ echo "OK  作り直してもチケットを読める"
 
 [ "$(field venue)" = "smoke" ] || fail "施設が入れ替わっている（$(field venue)）"
 echo "OK  同じ施設を読み戻している"
+
+# **監視に接続数が出ること**（CLAUDE.md 8）。いま誰も見ていないので 0。
+[ "$(field connections)" = "0" ] || fail "接続数が出ていない（$(field connections)）"
+echo "OK  監視に接続数が出る"
 
 # ---- 後始末 ----
 

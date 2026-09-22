@@ -13,6 +13,7 @@ import {
   estimateForJoin,
   estimateForTicket,
   findTable,
+  managedTables,
   minutes,
   ticketOwner,
   type Command,
@@ -22,7 +23,14 @@ import {
   type Timestamp,
   type VenueState,
 } from '@openseat/core';
-import type { TableView, TicketView, WaitEstimate } from '@openseat/shared';
+import type {
+  TableView,
+  TicketResponse,
+  TicketView,
+  VenueStatusResponse,
+  WaitEstimate,
+} from '@openseat/shared';
+import type { VenueHandle } from './deps.js';
 
 /**
  * チケットの画面に並ぶ操作。
@@ -149,4 +157,65 @@ export function estimatesFor(
     partySize,
     eta: estimateForJoin(state, { partySize, requiredTags: [] }, now),
   }));
+}
+
+// ---- 返しそのもの ----
+//
+// **1 回で取るときも、流し続けるときも、ここを通る**（9.5、ADR-0018）。
+// 組み立てを 2 か所に置くと、**同じものを見ているはずの 2 つの道が、違う姿を
+// 返す**ようになる。
+
+/**
+ * 本人に見せるチケット（`GET /api/t/{ticket}` と、その配信）。
+ *
+ * **見つからなければ `null`。** 流している最中にチケットが消えることは無いが、
+ * 消えていないことをここで確かめておけば、呼ぶ側が同じ確認を書かずに済む。
+ */
+export function ticketResponse(
+  state: VenueState,
+  ticketId: string,
+  now: Timestamp,
+): TicketResponse | null {
+  const ticket: Ticket | undefined = state.tickets.find((item) => item.id === ticketId);
+  if (ticket === undefined) return null;
+  return { serverNow: now, ticket: ticketView(state, ticket, now) };
+}
+
+/** 待っているとみなす状態。着席した人は行列から出ている。 */
+const QUEUED: readonly string[] = ['WAITING', 'PAUSED', 'CALLED'];
+
+/**
+ * 施設のいまの様子（`GET /api/v/{venue}/status` と、その配信）。
+ *
+ * **席の内訳は数だけ。** どの席が空いているかを外に出すと、並ばずに直行する人が
+ * 出て、案内された人の席が塞がる（7.11 の事故が増える）。
+ */
+export function venueStatus(
+  venue: VenueHandle,
+  state: VenueState,
+  sizes: readonly number[],
+  now: Timestamp,
+): VenueStatusResponse {
+  const managed: readonly Table[] = managedTables(state);
+  return {
+    serverNow: now,
+    venue: profileOf(venue, state),
+    waiting: state.tickets.filter((ticket) => QUEUED.includes(ticket.state)).length,
+    freeTables: managed.filter((table) => table.status === 'FREE').length,
+    managedTables: managed.length,
+    estimates: [...estimatesFor(state, sizes, now)],
+    longWaitConfirmMin: state.policy.longWaitConfirmMin,
+  };
+}
+
+/** 施設そのものの姿。**運用しているか、受付を開いているか、いつ終わるか。** */
+function profileOf(venue: VenueHandle, state: VenueState): VenueStatusResponse['venue'] {
+  return {
+    slug: venue.slug,
+    name: venue.name,
+    timezone: venue.timezone,
+    operating: state.operating,
+    joinOpen: state.joinOpen,
+    closesAt: state.closesAt,
+  };
 }

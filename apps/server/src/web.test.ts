@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { harness, seed, type Harness } from '../db/fixtures.js';
+import { openHub } from '../stream/hub.js';
 import { openRegistry } from '../venue/registry.js';
 import { buildApp, type Health } from './app.js';
 import { webApp } from './web.js';
@@ -42,6 +43,7 @@ beforeEach(() => {
     registry: openRegistry({ db: box.db, clock: () => OPENED }),
     clock: () => OPENED,
     web: webApp(dist),
+    hub: openHub(),
     health: () => HEALTHY,
   });
 });
@@ -191,6 +193,7 @@ describe('/healthz', () => {
       registry: openRegistry({ db: box.db, clock: () => OPENED }),
       clock: () => OPENED + minutes(1),
       web: webApp(dist),
+      hub: openHub(),
       health: () => ({ ok: false }),
     });
     expect((await ailing.request('/healthz', { headers: AS_BROWSER })).status).toBe(503);

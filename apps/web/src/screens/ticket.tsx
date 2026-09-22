@@ -14,7 +14,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import type { CommandType } from '@openseat/core';
-import type { TicketActionRequest, TicketResponse, TicketView } from '@openseat/shared';
+import {
+  STREAM_FALLBACK_POLL_MS,
+  TicketResponse,
+  type TicketActionRequest,
+  type TicketView,
+} from '@openseat/shared';
 import { ApiError, act, readTicket } from '../api.ts';
 import { ActionButton } from '../components/button.tsx';
 import { Countdown } from '../components/countdown.tsx';
@@ -23,22 +28,40 @@ import { StateLine } from '../components/state-line.tsx';
 import { Stepper } from '../components/stepper.tsx';
 import { STEPPER_MAX_PARTY_SIZE, STEPPER_MIN_PARTY_SIZE } from '../limits.ts';
 import { t, tAction, tError } from '../i18n.ts';
+import { LIVE_QUERY, useLive } from '../use-live.ts';
 
-/** 呼ばれている人は短く、そうでない人はゆるく取り直す。 */
+/**
+ * 配信が使えないときに取り直す間隔（9.5 の退避）。
+ *
+ * **終わった人は取りに行かない。** もう変わらないので、電池を使う理由が無い。
+ */
 function intervalFor(view: TicketView | undefined): number | false {
-  if (view === undefined) return 5_000;
-  if (view.state === 'CALLED') return 3_000;
-  return view.endReason === null ? 8_000 : false;
+  if (view === undefined) return STREAM_FALLBACK_POLL_MS;
+  return view.endReason === null ? STREAM_FALLBACK_POLL_MS : false;
 }
 
 export function TicketScreen(): React.JSX.Element {
   const ticketId: string = useParams()['ticket'] ?? '';
   const secret: string = useSearchParams()[0].get('k') ?? '';
+  const key: readonly unknown[] = ['ticket', ticketId, secret];
+
+  // **つながっていれば、取りに行かない**（9.5）。二重に取っても何も分からない。
+  //
+  // 秘密が無ければつながない。**断られると分かっているものを叩かない** ——
+  // 合わない秘密のほうは叩き続けるが、そちらは 30 秒おきで止まるうえ、
+  // **回線が戻れば配信も戻る**（諦めると戻らない）。
+  const live: boolean = useLive({
+    url: secret === '' ? null : `/api/t/${encodeURIComponent(ticketId)}/stream?k=${encodeURIComponent(secret)}`,
+    event: 'ticket',
+    checks: TicketResponse,
+    queryKey: key,
+  });
 
   const shown = useQuery({
-    queryKey: ['ticket', ticketId, secret],
+    ...LIVE_QUERY,
+    queryKey: key,
     queryFn: () => readTicket(ticketId, secret),
-    refetchInterval: (query) => intervalFor(query.state.data?.ticket),
+    refetchInterval: (query) => (live ? false : intervalFor(query.state.data?.ticket)),
   });
 
   if (shown.isPending) return <Screen title="…"><Notice>…</Notice></Screen>;

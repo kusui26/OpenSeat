@@ -13,7 +13,7 @@
  * `if (ticket.state === 'CALLED')` が現れたら、それは設計の誤りである。
  */
 
-import { ANONYMOUS, type Command, type Ticket, type VenueState } from '@openseat/core';
+import { ANONYMOUS, type Command, type VenueState } from '@openseat/core';
 import {
   JoinRequest,
   TICKET_ACTIONS,
@@ -28,7 +28,7 @@ import { actorFor, clientTokenOf, keepClientToken } from './identity.js';
 import { idempotencyKeyOf, paramOf } from './request.js';
 import { problem, rejected } from './respond.js';
 import { hashOf } from './secrets.js';
-import { ticketView } from './views.js';
+import { ticketResponse } from './views.js';
 
 export function ticketRoutes(deps: Deps): Hono {
   const app = new Hono();
@@ -209,10 +209,10 @@ function plain(input: Exclude<TicketActionRequest, AtTable>, ticketId: string): 
 
 /** いまの状態から、返す中身を作り直す（ADR-0015）。 */
 function seen(deps: Deps, state: VenueState, ticketId: string): TicketResponse {
-  const now = deps.clock();
-  const ticket: Ticket | undefined = state.tickets.find((item) => item.id === ticketId);
-  if (ticket === undefined) throw new Error('適用したはずのチケットが見つかりません');
-  return { serverNow: now, ticket: ticketView(state, ticket, now) };
+  const shown: TicketResponse | null = ticketResponse(state, ticketId, deps.clock());
+  // **適用したはずのチケットが無いのは、実装の誤りである。** 握り潰さない。
+  if (shown === null) throw new Error('適用したはずのチケットが見つかりません');
+  return shown;
 }
 
 /** 本文。**壊れていても投げない** —— 断りは Zod の検証が出す。 */

@@ -189,9 +189,31 @@ function responses(route: RouteSpec, convert: Converter): Readonly<Record<string
   return {
     '200': {
       description: route.summary,
-      content: { 'application/json': { schema: convert.of(route.response, 'output') } },
+      content: okContent(route, convert),
     },
     ...errorResponses(route, convert),
+  };
+}
+
+/**
+ * 通ったときに返るもの。
+ *
+ * **流し続ける入口は種別が違う**（9.5、ADR-0018）。1 回の JSON ではなく
+ * `text/event-stream` を返し、`response` は**流れてくる 1 通の形**を表す。
+ * OpenAPI は「流れ」を書ける形を持たないので、**1 通の形と、読み方の説明**を
+ * 載せる。
+ */
+function okContent(route: RouteSpec, convert: Converter): Schema {
+  const schema: Schema = convert.of(route.response, 'output');
+  if (route.stream !== true) return { 'application/json': { schema } };
+  return {
+    'text/event-stream': {
+      schema,
+      description:
+        'Server-Sent Events。1 通ごとに、ここに書いた形がそのまま `data:` に入る。' +
+        'つないだ直後に必ず現在の姿が 1 通届くので、切れているあいだの変化は次の接続で吸収される。' +
+        '`event: ping` は中身を持たない（接続を保つためだけのもの）。',
+    },
   };
 }
 
