@@ -33,8 +33,7 @@ RUN pnpm --filter @openseat/core build && pnpm --filter "./${APP}" build
 
 # **本番に要るものだけを取り出す。** `--prod` で開発用の依存を落とし、
 # ワークスペースの依存は実体として置かれる（`--legacy` を使わない理由）。
-RUN pnpm --filter "./${APP}" --prod deploy --legacy /out \
- && rm -f /out/dist/db/*.test.js /out/dist/db/fixtures.js
+RUN pnpm --filter "./${APP}" --prod deploy --legacy /out
 
 # ---- 2. 走らせる ----
 FROM node:22-alpine AS run
