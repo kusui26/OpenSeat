@@ -11,9 +11,11 @@
 export type { Bundle } from './bundle.js';
 export { LOCALES, type Locale } from './bundle.js';
 export {
+  ACTION_MESSAGE_KEYS,
   MESSAGES,
   PLAN_NOTIFICATIONS,
   SCAN_MESSAGE_KEYS,
+  STATE_MESSAGE_KEYS,
   type MessageKey,
   type ParamsOf,
 } from './messages.js';

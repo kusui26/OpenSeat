@@ -25,8 +25,10 @@ export default tseslint.config(
   },
 
   // ---- TypeScript（型情報つき） ----
+  // **`.tsx` も含める。** 画面の部品はそちらにあるので、外すと画面だけが
+  // 検査されないまま育つ。
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
     extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -146,10 +148,43 @@ export default tseslint.config(
   // ---- テスト ----
   // 時刻の偽装や重複した組み立てが必要になるため、長さの制約から外す。
   {
-    files: ['**/*.test.ts'],
+    files: ['**/*.test.ts', '**/*.test.tsx'],
     rules: {
       'max-lines-per-function': 'off',
       complexity: 'off',
+    },
+  },
+
+  // ---- 画面の部品 ----
+  // **20 行は、論理の量を測る目安である。** JSX は論理ではなく組み立てで、
+  // 1 つの部品が「見出し・本文・ボタン・注記」を並べるだけで 20 行に届く。
+  //
+  // 実際、20 行に寄せようとして部品を割ったら**警告が 5 件から 7 件に増えた** ——
+  // 分割代入した props の型注釈が関数の行数に数えられるためである（PR 6）。
+  // **数を合わせるための分割は、読みやすさを下げる。**
+  //
+  // やるべき分割（重複の共通化、props の名前付き interface 化、送信処理の
+  // hook 化）はやり切ったうえで、**組み立ての量に見合う幅**に広げる。
+  // 論理が増えたときは `complexity` が先に鳴る。
+  {
+    files: ['**/*.tsx'],
+    rules: {
+      'max-lines-per-function': ['warn', { max: 40, skipBlankLines: true, skipComments: true }],
+    },
+  },
+
+  // ---- 設定ファイル（型情報なしで解析している） ----
+  // `allowDefaultProject` に載せたファイルは、どの tsconfig にも属さないので
+  // 型が引けない。**引けない型を「安全でない」と咎めても、何も守れない。**
+  // ここだけ、型に頼る検査を外す。中身は Vite と Drizzle の設定だけである。
+  {
+    files: ['*.config.ts', 'apps/*/*.config.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
     },
   },
 

@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+
+  // **束ねるのは Vite である。** ここは型を確かめるだけなので、何も出さない
+  // （だから `composite` にもしない —— 誰もこの出力を参照しない）。
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

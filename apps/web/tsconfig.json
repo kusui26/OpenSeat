@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+
+    // **ここはブラウザである。** Node の型を入れない（`process` も `node:*` も
+    // 使えないことを、型で示しておく）。検査は `pnpm check:arch` にもある。
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx",
+
+    // Vite が束ねるので、拡張子まで書かせる必要が無い。
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "allowImportingTsExtensions": true
+  },
+
+  // **テストも型検査に含める**（`pnpm typecheck`）。
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    { "path": "../../packages/core/tsconfig.build.json" },
+    { "path": "../../packages/shared/tsconfig.build.json" }
+  ]
+}

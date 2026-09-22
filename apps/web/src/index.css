@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+
+/**
+ * 画面の土台（開発プラン 10.4）。
+ *
+ * **文字は大きく。** 立ったまま、片手で、屋内の明るいところで読む。
+ * 既定を 18px にしてあるのは、フードコートでスマホを見る姿勢を想定したものである。
+ */
+:root {
+  font-size: 18px;
+
+  /**
+   * **明るい配色で固定する。** 画面はどれも明るい色で組んである（10.4）ので、
+   * 端末が暗い設定だと、ブラウザが入力欄だけを勝手に反転させて読めなくなる。
+   * 暗い配色そのものは、現場で確かめてから足す。
+   */
+  color-scheme: light;
+}
+
+body {
+  background: #fff;
+  margin: 0;
+}
+
+/** **動きを減らす設定を尊重する。** 目が回る人がいる。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

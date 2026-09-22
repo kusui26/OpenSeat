@@ -22,12 +22,22 @@ import { sameOriginOnly } from './origin.js';
 import { ticketRoutes } from './tickets.js';
 import { venueRoutes } from './venue.js';
 
+/**
+ * API の道の始まり。**画面の道と混ざらない印**である（`src/web.ts`）。
+ *
+ * 契約（`packages/shared` の `ROUTES`）もこの下に並ぶ。
+ */
+export const API_PREFIX = '/api/';
+
 /** 利用者の API（9.7 の 1〜3・6）。座席 QR は PR 10、ボードは PR 11。 */
 export function api(deps: Deps, sink?: Sink): Hono {
   const app = new Hono();
-  app.use('*', headers());
-  app.use('*', sameOriginOnly());
-  app.use('*', sink === undefined ? accessLog() : accessLog(sink, deps.clock));
+  // **守りは API の道にだけ付ける。** このアプリは画面と同じ入口に載るので
+  // （9.2）、`*` に付けると画面の返しにまで API 向けの CSP がかかる。
+  const under = `${API_PREFIX}*`;
+  app.use(under, headers());
+  app.use(under, sameOriginOnly());
+  app.use(under, sink === undefined ? accessLog() : accessLog(sink, deps.clock));
   app.route('/', ticketRoutes(deps));
   app.route('/', venueRoutes(deps));
   return app;
@@ -39,6 +49,10 @@ export function api(deps: Deps, sink?: Sink): Hono {
  * - **`no-referrer`**: チケット URL の秘密パラメータを、外部へ漏らさない（9.8）
  * - **`nosniff`**: 返した種別以外に解釈させない
  * - **枠に入れさせない**: 別のサイトに埋め込まれた偽の画面を作らせない
+ *
+ * **CSP はここでは何も許さない。** API が返すのは JSON だけで、そこから読み込む
+ * ものは 1 つも無い。**画面の CSP は別である**（`src/web.ts` の `appSecurity`）。
+ * 万一ここから HTML が返るようなことがあっても、何も動かないのが正しい。
  */
 function headers(): ReturnType<typeof secureHeaders> {
   return secureHeaders({
@@ -46,7 +60,6 @@ function headers(): ReturnType<typeof secureHeaders> {
     xFrameOptions: 'DENY',
     xContentTypeOptions: 'nosniff',
     crossOriginOpenerPolicy: 'same-origin',
-    // 画面（`apps/web`）は PR 6 で入る。**そのときに CSP を詰める。**
     contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
   });
 }

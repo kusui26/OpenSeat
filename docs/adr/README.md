@@ -26,6 +26,8 @@
 | [0013](0013-what-we-record.md) | 状態は行そのものとして持ち、イベントは配信と統計と監査のために別に残す | Accepted | 2026-09-22 |
 | [0014](0014-permissions-in-core.md) | 権限は `core` の表で決め、`apply` を公開しない | Accepted | 2026-09-22 |
 | [0015](0015-idempotency-key.md) | 冪等キーは画面が作り、控えるのは応答ではなく結末とする | Accepted | 2026-09-22 |
+| [0016](0016-serving-the-app.md) | 画面は API と同じ入口から配り、CSP と置き場の期限を道ごとに分ける | Accepted | 2026-09-22 |
+| [0017](0017-no-component-library-yet.md) | 画面の部品一式（shadcn/ui）は入れず、素の要素で作る | Accepted | 2026-09-22 |
 
 ## テンプレート
 

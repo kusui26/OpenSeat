@@ -90,6 +90,22 @@ const FORBIDDEN_IN_ROUTES = [
   { pattern: /\bisPermitted\b/, reason: 'ルートで権限を判定しない。dispatch が評価する' },
 ];
 
+/**
+ * 画面（`apps/web`）で使ってはならない記述。
+ *
+ * **ビューは状態を描くだけである**（CLAUDE.md 3.1）。業務判断を画面に置くと、
+ * 「押せます」と出したのにサーバが断る、という食い違いが必ずどこかで起きる。
+ * **押せる操作はサーバが返す**（`routes/views.ts` が `core` に聞いている）。
+ */
+const FORBIDDEN_IN_WEB = [
+  { pattern: /from\s+['"]node:/, reason: 'ブラウザに Node の組み込みは無い' },
+  { pattern: /\bPERMISSIONS\b/, reason: '画面で権限を判定しない（CLAUDE.md 3.1）' },
+  { pattern: /\bisPermitted\b/, reason: '画面で権限を判定しない。押せる操作はサーバが返す' },
+  { pattern: /\bdispatch\s*\(/, reason: '画面で状態機械を回さない（CLAUDE.md 3.1）' },
+  { pattern: /\bcheckInvariants\b/, reason: '不変条件を守るのはサーバの仕事' },
+  { pattern: /\bTICKET_TRANSITIONS\b/, reason: '画面で遷移表を読まない' },
+];
+
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-sim', 'build', 'coverage', '.git']);
 
 /** ディレクトリ配下の TypeScript ファイルを集める。存在しなければ空配列。 */
@@ -106,11 +122,17 @@ async function collectSources(directory) {
     if (entry.isDirectory()) {
       if (SKIP_DIRECTORIES.has(entry.name)) continue;
       found.push(...(await collectSources(full)));
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+    } else if (isSource(entry.name)) {
       found.push(full);
     }
   }
   return found;
+}
+
+/** 検査の対象。**画面の部品は `.tsx` にある**ので、そちらも集める。 */
+function isSource(name) {
+  if (name.endsWith('.d.ts')) return false;
+  return name.endsWith('.ts') || name.endsWith('.tsx');
 }
 
 /** 行コメントと複数行コメントを除いた本文を返す。説明文の中の語で誤検知しないため。 */
@@ -169,7 +191,8 @@ async function checkCoreHasNoDependencies() {
 
 /** テストファイルは対象外にする。テストでは時刻の偽装などが必要になるため。 */
 function isTest(filePath) {
-  return filePath.endsWith('.test.ts') || filePath.includes(`${sep}__tests__${sep}`);
+  if (filePath.endsWith('.test.ts') || filePath.endsWith('.test.tsx')) return true;
+  return filePath.includes(`${sep}__tests__${sep}`);
 }
 
 async function checkCorePurity() {
@@ -254,6 +277,16 @@ async function checkRouteBoundaries() {
   return problems;
 }
 
+/** 画面が状態を描くだけであることを確かめる。 */
+async function checkWebOnlyDraws() {
+  const files = await collectSources(join(ROOT, 'apps', 'web', 'src'));
+  const problems = [];
+  for (const file of files.filter((candidate) => !isTest(candidate))) {
+    problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_WEB));
+  }
+  return problems;
+}
+
 function report(title, problems) {
   if (problems.length === 0) {
     console.log(`  OK  ${title}`);
@@ -281,6 +314,8 @@ async function main() {
     'ルート層が永続化層を直接呼ばず、権限も判定していない',
     await checkRouteBoundaries(),
   );
+
+  failures += report('apps/web が状態を描くだけである（業務判断を持たない）', await checkWebOnlyDraws());
 
   if (failures > 0) {
     console.error(`\n違反 ${failures} 件。CLAUDE.md 3.3 を参照してください。`);
