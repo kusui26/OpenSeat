@@ -4,6 +4,10 @@
  * **ここが境界の中心である。** 設定を読み、データベースを開き、施設アクターを
  * 起こし、HTTP を待ち受ける。業務判断は 1 行も書かない（CLAUDE.md 3.1）。
  *
+ * **どの道を誰が受け持つかは [`app.ts`](app.ts) にある。** ここはそれを走らせる
+ * だけにしてある —— 読み込んだだけで記録を開きポートを掴むファイルは、
+ * テストから組み立て直せないからである。
+ *
  * **利用者の API は [`routes/`](../routes/index.ts) にある**（9.7）。座席 QR の分岐は
  * PR 10、ボードは PR 11、スタッフと管理は PR 12 以降で足す。
  *
@@ -13,15 +17,16 @@
  */
 
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import process from 'node:process';
 import { open, type Connection } from '../db/client.js';
 import { loadVenueState, migrationCount } from '../db/repository.js';
 import { TickFailed, type VenueActor } from '../venue/actor.js';
 import { openRegistry, type Registry } from '../venue/registry.js';
-import { userApi } from './api.js';
+import { buildApp, type Health } from './app.js';
 import { readConfig, type Config } from './config.js';
 import { ensureVenue } from './seed.js';
+import { webApp } from './web.js';
 
 /** 時刻を進める間隔（9.4）。**個別のタイマーは持たない。** */
 const TICK_INTERVAL_MS = 10_000;
@@ -80,7 +85,7 @@ const ticker = setInterval(() => {
  * **秘密は載せない**（CLAUDE.md 7）。座席トークン、端末トークン、通知先は
  * ここに現れない。数と時刻だけで、外から状態の見当がつくようにしてある。
  */
-function health(now: number): Record<string, unknown> {
+function health(now: number): Health {
   const state = loadVenueState(connection.db, config.venueId);
   const lastTick: number | null = actor.lastTickAt();
   return {
@@ -105,19 +110,26 @@ function health(now: number): Record<string, unknown> {
   };
 }
 
-const app = new Hono();
-
-/** 利用者の API（9.7）。**契約は `packages/shared` が唯一の出典である。** */
-app.route('/', userApi({ db: connection.db, registry, clock: () => Date.now() }));
-
 /**
- * **答えられないときは 200 を返さない。** 置き場のヘルスチェックも外形監視も
- * ここを見て生死を決めるので、施設が読めないまま「元気です」と言うと、
- * 壊れたコンテナに人が案内され続ける。
+ * 画面（9.2）。**組み上がっていなければ配らない。**
+ *
+ * 手元でサーバだけを動かすとき、画面は Vite が配り、`/api` だけがこちらへ回って
+ * くる（`apps/web/vite.config.ts`）。コンテナでは `Dockerfile` が入れてある。
  */
-app.get('/healthz', (c) => {
-  const report = health(Date.now());
-  return c.json(report, report['ok'] === true ? 200 : 503);
+const web: Hono | null = webApp(config.webDir);
+console.log(
+  web === null
+    ? `画面は配りません（${config.webDir} に組み上がったものがありません）`
+    : `画面を ${config.webDir} から配ります`,
+);
+
+/** 道の割り当ては [`app.ts`](app.ts) にある。**順序に意味がある。** */
+const app: Hono = buildApp({
+  db: connection.db,
+  registry,
+  clock: () => Date.now(),
+  web,
+  health,
 });
 
 const server = serve({ fetch: app.fetch, port: config.port });

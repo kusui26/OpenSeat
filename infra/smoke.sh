@@ -94,6 +94,35 @@ CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/t/${TICKET}?k=wrong-
 [ "$CODE" = "403" ] || fail "他人がチケットを読めてしまう（$CODE）"
 echo "OK  他人は読めない"
 
+# ---- 画面（9.2） ----
+#
+# **同じコンテナから画面も配られること。** ここが空だと、施設は Docker を 2 つ
+# 面倒みることになり、引き取れなくなる（ADR-0005）。
+
+page() {
+  curl -fsS -H 'accept: text/html' "${BASE}$1"
+}
+
+page / | grep -q '<div id="root">' || fail "画面の 1 枚目が配られていない"
+echo "OK  画面が配られる"
+
+# **画面の中の道は、サーバに無くても 1 枚目に落ちる**（SPA）。
+page "/t/${TICKET}" | grep -q '<div id="root">' || fail "画面の中の道が 1 枚目に落ちない"
+echo "OK  画面の中の道も 1 枚目に落ちる"
+
+# **API は画面に飲まれない。** ブラウザと同じ求め方をしても JSON が返る。
+page "/api/v/smoke/status" | grep -q '"waiting"' || fail "API の返しが画面に飲まれている"
+echo "OK  API は画面に飲まれない"
+
+# **監視の目も塞がれない**（`src/app.ts` の「載せる順序」）。
+page /healthz | grep -q '"ok"' || fail "/healthz が画面に飲まれている"
+echo "OK  /healthz が画面に飲まれない"
+
+# **消えた資材に HTML を返さない**（「予期しない `<`」で止めさせない）。
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H 'accept: */*' "${BASE}/assets/消えた.js")"
+[ "$CODE" = "404" ] || fail "消えた資材に 404 以外が返る（$CODE）"
+echo "OK  消えた資材には 404 を返す"
+
 # ---- 2 回目: 席の数を変えて作り直す ----
 #
 # **記録が残っていれば、施設はもうあるので作り直さない。** 席は 4 つのままになる。

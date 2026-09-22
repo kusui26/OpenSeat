@@ -4,7 +4,9 @@
 # 「Docker が動く環境が 1 つ」で引き取れることが、運用費の問題を解く唯一の道
 # だからである（9.1 の導入形態、14.4）。
 #
-# 載せるのは `apps/server`（API・配信・スケジューラ・静的配信。9.2）。
+# 載せるのは `apps/server`（API・配信・スケジューラ・静的配信。9.2）と、
+# **そこから配る画面**（`apps/web` の組み上がり）。画面を別のホスティングに
+# 置くと、施設が引き取るときに「Docker が動く環境が 1 つ」では済まなくなる。
 # 1 日スパイクで確かめた組み立て方をそのまま引き継いでいる。
 #
 #   docker build -f infra/Dockerfile -t openseat .
@@ -25,15 +27,21 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/
 COPY packages/shared/package.json packages/shared/
 COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core packages/core
 COPY packages/shared packages/shared
 COPY apps/server apps/server
+COPY apps/web apps/web
+
+# **順序に意味がある。** 画面もサーバも、`core` と `shared` の組み上がり
+# （型を含む）を読む。
 RUN pnpm --filter @openseat/core build \
  && pnpm --filter @openseat/shared build \
- && pnpm --filter "./${APP}" build
+ && pnpm --filter "./${APP}" build \
+ && pnpm --filter @openseat/web build
 
 # **本番に要るものだけを取り出す。** `--prod` で開発用の依存を落とし、
 # ワークスペースの依存は実体として置かれる（`--legacy` を使わない理由）。
@@ -50,10 +58,14 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 ENV NODE_ENV=production \
     PORT=8080 \
     DB_PATH=/data/openseat.db \
-    MIGRATIONS_DIR=/app/db/migrations
+    MIGRATIONS_DIR=/app/db/migrations \
+    WEB_DIR=/app/web
 
 WORKDIR /app
 COPY --from=build /out ./
+
+# **画面を同じイメージに入れる**（ADR-0005）。`WEB_DIR` がここを指している。
+COPY --from=build /repo/apps/web/dist ./web
 
 # **root で走らせない。** `node` は公式イメージに元からいる非特権ユーザー。
 RUN mkdir -p /data && chown -R node:node /data /app

@@ -5,9 +5,11 @@ export default defineConfig({
     include: [
       'packages/*/src/**/*.test.ts',
       'packages/*/sim/**/*.test.ts',
-      // アプリの中は層が増えていく（`db` / `venue` / `routes`）。**置き場所を
+      // アプリの中は層が増えていく（`db` / `venue` / `routes` / 画面）。**置き場所を
       // 数え上げない。** 数え上げると、層を足したときにテストが静かに走らなくなる。
+      // `.tsx` も拾う —— 画面の部品はそちらにある。
       'apps/*/**/*.test.ts',
+      'apps/*/**/*.test.tsx',
     ],
     environment: 'node',
     /**
@@ -17,7 +19,12 @@ export default defineConfig({
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
-      include: ['packages/*/src/**/*.ts', 'packages/*/sim/**/*.ts', 'apps/*/{db,venue,src}/**/*.ts'],
+      include: [
+        'packages/*/src/**/*.ts',
+        'packages/*/sim/**/*.ts',
+        'apps/*/{db,venue,src}/**/*.ts',
+        'apps/*/src/**/*.tsx',
+      ],
       exclude: ['**/*.test.ts', '**/index.ts'],
     },
   },

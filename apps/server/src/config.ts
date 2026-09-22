@@ -16,6 +16,13 @@ export interface Config {
   readonly dbPath: string;
   /** マイグレーションの置き場。実行時の作業ディレクトリからの相対。 */
   readonly migrationsFolder: string;
+  /**
+   * 組み上がった画面の置き場（9.2）。
+   *
+   * **無ければ配らない。** 手元でサーバだけを動かすとき、画面は Vite が配る。
+   * コンテナでは `Dockerfile` が絶対パスで指す。
+   */
+  readonly webDir: string;
   readonly venueId: string;
   readonly venueName: string;
   /**
@@ -41,6 +48,7 @@ const DEFAULTS = {
   port: 8080,
   dbPath: './data/openseat.db',
   migrationsFolder: 'db/migrations',
+  webDir: '../web/dist',
   venueId: 'demo',
   venueName: 'OpenSeat',
   seedTables: 0,
@@ -60,6 +68,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: number(env['PORT'], DEFAULTS.port),
     dbPath: env['DB_PATH'] ?? DEFAULTS.dbPath,
     migrationsFolder: env['MIGRATIONS_DIR'] ?? DEFAULTS.migrationsFolder,
+    webDir: env['WEB_DIR'] ?? DEFAULTS.webDir,
     venueId: env['VENUE_ID'] ?? DEFAULTS.venueId,
     venueName: env['VENUE_NAME'] ?? DEFAULTS.venueName,
     seedTables: number(env['SEED_TABLES'], DEFAULTS.seedTables),

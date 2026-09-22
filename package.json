@@ -16,7 +16,7 @@
   "packageManager": "pnpm@11.10.0",
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json && tsc -p packages/core/tsconfig.sim.json --noEmit && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json",
+    "typecheck": "tsc --build && tsc -p packages/core/tsconfig.json && tsc -p packages/core/tsconfig.sim.json --noEmit && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "sim": "tsc -p packages/core/tsconfig.sim.json && node packages/core/dist-sim/sim/main.js",

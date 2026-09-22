@@ -14,7 +14,7 @@
  * そこを機械に見てもらう。
  */
 
-import type { TableScanKind } from '@openseat/core';
+import type { CommandType, TableScanKind, TicketState } from '@openseat/core';
 
 /**
  * 文言の鍵と、その文言が受け取る引数。
@@ -54,6 +54,72 @@ export const MESSAGES = {
   'venue.joinClosed': [],
   'ticket.staleCall': [],
   'ticket.longWaitConfirm': ['minutes'],
+
+  // ---- 受付の画面（10.1） ----
+  'join.heading': ['venue'],
+  'join.partySize': [],
+  'join.decrease': [],
+  'join.increase': [],
+  'join.submit': [],
+  'join.sending': [],
+  'join.watchOnly': [],
+  'join.eta': ['fromMin', 'toMin'],
+  'join.etaUnknown': [],
+  'join.noSeat': [],
+
+  // ---- チケットの画面（7.3、10.4） ----
+  'ticket.heading': ['code'],
+  'ticket.keepOpen': [],
+  'ticket.comeBack': [],
+  'ticket.copyLink': [],
+  'ticket.copied': [],
+  'ticket.table': ['table'],
+  'ticket.remaining': ['minutes', 'seconds'],
+  'ticket.expired': [],
+  'ticket.ahead': ['ahead'],
+  'ticket.reload': [],
+
+  // ---- 状態ごとの一言（7.3 の 8 状態） ----
+  'state.WAITING': [],
+  'state.PAUSED': [],
+  'state.CALLED': [],
+  'state.SEATED': [],
+  'state.DONE': [],
+  'state.CANCELLED': [],
+  'state.NO_SHOW': [],
+  'state.EXPIRED': [],
+
+  // ---- 押せる操作の名前（22 コマンド） ----
+  'action.JOIN': [],
+  'action.WALK_IN': [],
+  'action.CANCEL': [],
+  'action.PAUSE': [],
+  'action.READY': [],
+  'action.EXTEND': [],
+  'action.PASS': [],
+  'action.CHECK_IN': [],
+  'action.CHECK_IN_EARLY': [],
+  'action.SWAP_TABLE': [],
+  'action.CHECK_OUT': [],
+  'action.STILL_HERE': [],
+  'action.REPORT_TAKEN': [],
+  'action.REPORT_IN_USE': [],
+  'action.CONFIRM_FREE': [],
+  'action.CHANGE_PARTY_SIZE': [],
+  'action.HEARTBEAT': [],
+  'action.OPEN': [],
+  'action.CLOSE': [],
+  'action.RELEASE_ALL': [],
+  'action.DISABLE_TABLE': [],
+  'action.ENABLE_TABLE': [],
+
+  // ---- 空き状況の画面（10.1） ----
+  'status.heading': ['venue'],
+  'status.waiting': ['count'],
+  'status.free': ['free', 'managed'],
+  'status.notOperating': [],
+  'status.joinHere': [],
+  'status.forParty': ['partySize'],
 } as const satisfies Readonly<Record<string, readonly string[]>>;
 
 export type MessageKey = keyof typeof MESSAGES;
@@ -87,6 +153,54 @@ export const SCAN_MESSAGE_KEYS = {
   turnover: 'scan.turnover',
   not_managed: 'scan.not_managed',
 } as const satisfies Readonly<Record<TableScanKind, MessageKey>>;
+
+/**
+ * チケットの状態 1 つずつに、一言。
+ *
+ * **`core` の `TicketState` を漏れなく覆う。** 8 状態のうち 1 つでも文言が無ければ
+ * 型エラーになる（7.3 の表と 1 対 1）。
+ */
+export const STATE_MESSAGE_KEYS = {
+  WAITING: 'state.WAITING',
+  PAUSED: 'state.PAUSED',
+  CALLED: 'state.CALLED',
+  SEATED: 'state.SEATED',
+  DONE: 'state.DONE',
+  CANCELLED: 'state.CANCELLED',
+  NO_SHOW: 'state.NO_SHOW',
+  EXPIRED: 'state.EXPIRED',
+} as const satisfies Readonly<Record<TicketState, MessageKey>>;
+
+/**
+ * 押せる操作の名前。
+ *
+ * **`core` のコマンド 22 種を漏れなく覆う。** サーバが返した操作に名前が無いと、
+ * 画面にボタンの鍵がそのまま出る。
+ */
+export const ACTION_MESSAGE_KEYS = {
+  JOIN: 'action.JOIN',
+  WALK_IN: 'action.WALK_IN',
+  CANCEL: 'action.CANCEL',
+  PAUSE: 'action.PAUSE',
+  READY: 'action.READY',
+  EXTEND: 'action.EXTEND',
+  PASS: 'action.PASS',
+  CHECK_IN: 'action.CHECK_IN',
+  CHECK_IN_EARLY: 'action.CHECK_IN_EARLY',
+  SWAP_TABLE: 'action.SWAP_TABLE',
+  CHECK_OUT: 'action.CHECK_OUT',
+  STILL_HERE: 'action.STILL_HERE',
+  REPORT_TAKEN: 'action.REPORT_TAKEN',
+  REPORT_IN_USE: 'action.REPORT_IN_USE',
+  CONFIRM_FREE: 'action.CONFIRM_FREE',
+  CHANGE_PARTY_SIZE: 'action.CHANGE_PARTY_SIZE',
+  HEARTBEAT: 'action.HEARTBEAT',
+  OPEN: 'action.OPEN',
+  CLOSE: 'action.CLOSE',
+  RELEASE_ALL: 'action.RELEASE_ALL',
+  DISABLE_TABLE: 'action.DISABLE_TABLE',
+  ENABLE_TABLE: 'action.ENABLE_TABLE',
+} as const satisfies Readonly<Record<CommandType, MessageKey>>;
 
 /**
  * 開発プラン 17.3 の「通知文言の例」9 行と、実際の鍵の対応。
