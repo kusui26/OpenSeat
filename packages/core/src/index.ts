@@ -45,6 +45,9 @@ export {
 
 export type { VenueId, TableId, TicketId, TicketCode, TableLabel, Tag } from './domain/ids.js';
 
+export type { Actor, Role, Side } from './domain/actor.js';
+export { ANONYMOUS, ROLES, SIDES, member, sideOf, ticketOwner } from './domain/actor.js';
+
 export type {
   Table,
   TableStatus,
@@ -207,7 +210,6 @@ export { suggestNeedsCheck, uncertainTables, guidedTo } from './allocation/needs
 export type {
   Command,
   CommandType,
-  Actor,
   CancelReason,
   JoinCommand,
   CancelCommand,
@@ -233,7 +235,6 @@ export type {
   EnableTableCommand,
 } from './machine/command.js';
 export {
-  ACTORS,
   CANCEL_REASONS,
   CANCEL_END_REASONS,
   CHECKOUT_END_REASONS,
@@ -312,9 +313,13 @@ export {
   evaluateTableGuard,
 } from './machine/guards.js';
 
-// `settle`（割当と検査の出口）と `Draft` は公開しない。外から見える入口は
-// `apply` と `tick` の 2 つだけにしておく（CLAUDE.md 3 章）。
-export { apply } from './machine/apply.js';
+// **外から見える入口は `dispatch` と `tick` の 2 つだけである**（CLAUDE.md 3 章）。
+//
+// `apply` は公開しない。公開すると**権限を通らずに状態を変える道**ができてしまう。
+// `settle`（割当と検査の出口）と `Draft` も同じ理由で外に出さない。
+export { dispatch } from './machine/dispatch.js';
+
+export { PERMISSIONS, isPermitted, ownsTarget, targetTicketId } from './domain/permissions.js';
 
 export {
   ticketTransition,

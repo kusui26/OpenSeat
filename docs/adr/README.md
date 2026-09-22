@@ -24,6 +24,7 @@
 | [0011](0011-who-may-free-an-uncertain-seat.md) | 着席の記録が残っている席を空席に戻せるのは、スタッフだけとする | Accepted | 2026-09-21 |
 | [0012](0012-sqlite-driver.md) | SQLite のドライバを `better-sqlite3` とする | Accepted | 2026-09-22 |
 | [0013](0013-what-we-record.md) | 状態は行そのものとして持ち、イベントは配信と統計と監査のために別に残す | Accepted | 2026-09-22 |
+| [0014](0014-permissions-in-core.md) | 権限は `core` の表で決め、`apply` を公開しない | Accepted | 2026-09-22 |
 
 ## テンプレート
 

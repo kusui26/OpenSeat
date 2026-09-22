@@ -23,7 +23,7 @@ import type { EndReason } from '../domain/ticket.js';
 import type { TicketOrigin } from './ticket-machine.js';
 import type { AssignmentReason } from '../allocation/choose.js';
 import type { Timestamp } from '../time.js';
-import type { Actor, CancelReason } from './command.js';
+import type { CancelReason, Side } from './command.js';
 
 /**
  * チケットが作られた（全体プラン 7.5、7.12）。
@@ -278,7 +278,7 @@ export interface TicketEnded {
   readonly at: Timestamp;
   readonly ticketId: TicketId;
   readonly endReason: EndReason;
-  readonly by: Actor | null;
+  readonly by: Side | null;
   readonly cancelReason: CancelReason | null;
 }
 

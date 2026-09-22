@@ -74,11 +74,20 @@ const FORBIDDEN_IN_SHARED = [
 /** `packages/shared` が持ってよい依存。**増やすときは理由を PR に書くこと。** */
 const ALLOWED_SHARED_DEPENDENCIES = ['zod', '@openseat/core'];
 
-/** ルート層から直接触ってはならないもの。ドメインへの委譲を迂回させない。 */
+/**
+ * ルート層から直接触ってはならないもの。ドメインへの委譲を迂回させない。
+ *
+ * **権限の判定も含む**（CLAUDE.md 3.2(4)）。誰が何を出せるかは `core` の表が決め、
+ * `dispatch` が適用の前に評価する。ハンドラに `if (role === 'staff')` を書くと、
+ * **ハンドラを書き換えるたびに権限が変わりうる**ことになる。
+ */
 const FORBIDDEN_IN_ROUTES = [
   { pattern: /from\s+['"][^'"]*\/db\//, reason: 'ルートから永続化層を直接呼ばない（CLAUDE.md 3.1）' },
   { pattern: /from\s+['"]drizzle-orm/, reason: 'ルートから ORM を直接呼ばない（CLAUDE.md 3.1）' },
   { pattern: /from\s+['"][^'"]*schema(\.js)?['"]/, reason: 'ルートからスキーマを直接参照しない' },
+  { pattern: /\bPERMISSIONS\b/, reason: 'ルートで権限表を読まない。dispatch が評価する（CLAUDE.md 3.2(4)）' },
+  { pattern: /\b(role|by)\s*===/, reason: 'ルートで役割を判定しない（CLAUDE.md 3.2(4)）' },
+  { pattern: /\bisPermitted\b/, reason: 'ルートで権限を判定しない。dispatch が評価する' },
 ];
 
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-sim', 'build', 'coverage', '.git']);
@@ -265,7 +274,10 @@ async function main() {
   failures += report('packages/core/sim の読み書きが sim/main.ts に閉じている', await checkSimIoStaysAtEntry());
   failures += report('packages/shared が画面でも動く（Node の組み込みに触らない）', await checkSharedRunsAnywhere());
   failures += report('packages/shared の依存が最小である', await checkSharedDependencies());
-  failures += report('ルート層が永続化層を直接呼んでいない', await checkRouteBoundaries());
+  failures += report(
+    'ルート層が永続化層を直接呼ばず、権限も判定していない',
+    await checkRouteBoundaries(),
+  );
 
   if (failures > 0) {
     console.error(`\n違反 ${failures} 件。CLAUDE.md 3.3 を参照してください。`);

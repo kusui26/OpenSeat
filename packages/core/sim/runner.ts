@@ -48,6 +48,7 @@
  */
 
 import type {
+  Actor,
   Command,
   DomainEvent,
   Rejection,
@@ -57,16 +58,20 @@ import type {
   VenueState,
 } from '../src/index.js';
 import {
-  apply,
+  ANONYMOUS,
   createTable,
   createVenueState,
+  dispatch,
   estimateForJoin,
   findTicket,
   isDefect,
+  member,
   minutes,
   seconds,
   suggestNeedsCheck,
+  targetTicketId,
   tick,
+  ticketOwner,
 } from '../src/index.js';
 import {
   createParty,
@@ -252,9 +257,30 @@ export function openVenue(scenario: Scenario, now: Timestamp = SIM_EPOCH): Venue
   });
   const closesAt: Timestamp | null =
     scenario.closesAfter === null ? null : now + scenario.closesAfter;
-  const opened = apply(closed, { type: 'OPEN', closesAt, by: 'staff' }, now);
+  const opened = dispatch(closed, STAFF, { type: 'OPEN', closesAt, by: 'staff' }, now);
   if (!opened.ok) throw new Error(`運用を開始できない: ${opened.error.describe}`);
   return opened.value.state;
+}
+
+// ---- 誰が出しているか ----
+
+/**
+ * 現場のスタッフ。運用の開始と終了を出す。
+ *
+ * **シミュレータも権限の表を通る。** 通しておけば、`core` が許していない組み合わせを
+ * 出したときにファズが気づく（拒否が出て「想定外の拒否」として数えられる）。
+ */
+const STAFF: Actor = member('staff', 'sim-staff');
+
+/**
+ * そのコマンドを誰が出しているか。
+ *
+ * シミュレータに出てくる人は 2 種類しかいない。**チケットを持っている組**と、
+ * **まだ持っていない人**である（運用の開始だけがスタッフ）。
+ */
+function actorFor(command: Command): Actor {
+  const target: string | null = targetTicketId(command);
+  return target === null ? ANONYMOUS : ticketOwner(target);
 }
 
 // ---- 予定表 ----
@@ -575,7 +601,7 @@ class World {
   }
 
   private send(command: Command, at: Timestamp): void {
-    const result = apply(this.state, command, at);
+    const result = dispatch(this.state, actorFor(command), command, at);
     this.appliedAt.push(at);
     if (!result.ok) {
       if (isDefect(result.error)) this.defects.push(result.error);

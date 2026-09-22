@@ -8,7 +8,7 @@ import { checkInvariants, checkTransition } from '../invariant.js';
 import { minutes, seconds, type Timestamp } from '../time.js';
 import { apply } from './apply.js';
 import { remainingPauseBudget } from './deadlines.js';
-import { COMMAND_TYPES, type Actor, type CancelReason, type Command, type CommandType } from './command.js';
+import { COMMAND_TYPES, type Side, type CancelReason, type Command, type CommandType } from './command.js';
 import type { DomainEvent } from './events.js';
 import { STATE_INVARIANTS, priorityPreservedAcrossPause } from './invariants.js';
 import { TICKET_TRANSITIONS } from './ticket-machine.js';
@@ -89,7 +89,7 @@ const ticketIdArb: fc.Arbitrary<string> = fc.constantFrom(...TICKET_IDS, CALLED_
 
 const tableIdArb: fc.Arbitrary<string> = fc.constantFrom('tb0', 'tb1', 'tb2', HELD_TABLE_ID, 'missing');
 
-const actorArb: fc.Arbitrary<Actor> = fc.constantFrom<Actor>('user', 'staff');
+const actorArb: fc.Arbitrary<Side> = fc.constantFrom<Side>('user', 'staff');
 
 const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
@@ -103,7 +103,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
   fc
     .record({
       ticketId: ticketIdArb,
-      by: fc.constantFrom<Actor>('user', 'staff'),
+      by: fc.constantFrom<Side>('user', 'staff'),
       reason: fc.option(fc.constantFrom<CancelReason>('found_seat', 'leaving', 'too_long', 'other'), {
         nil: null,
       }),
@@ -117,7 +117,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: ticketIdArb, tableId: tableIdArb })
     .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
   fc
-    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, tableId: tableIdArb })
@@ -135,7 +135,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: fc.option(ticketIdArb, { nil: null }), tableId: tableIdArb })
     .map((fields): Command => ({ type: 'REPORT_IN_USE', ...fields })),
   fc
-    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CONFIRM_FREE', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, partySize: fc.integer({ min: 0, max: 6 }) })

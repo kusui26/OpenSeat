@@ -151,20 +151,23 @@ export const INVARIANTS = [
 
 **(4) 権限 DSL — 誰がどのコマンドを出せるかを表にする**
 
-権限判定をハンドラに散らさず、`packages/core/policy.ts` に宣言します。
+権限判定をハンドラに散らさず、`packages/core/src/domain/permissions.ts` に宣言します（7.16 の運用パラメータが入る `policy.ts` とは別のものなので、ファイルを分けています）。
 
 ```ts
 export const PERMISSIONS = {
-  JOIN:            ['anonymous'],
-  CHECK_IN:        ['ticket_owner', 'staff'],
-  CANCEL:          ['ticket_owner', 'staff'],
-  FORCE_FREE:      ['staff', 'admin'],
-  EDIT_LAYOUT:     ['admin', 'owner'],
-  RELEASE_ALL:     ['admin', 'owner'],
-} as const;
+  JOIN:          ['anonymous', 'ticket_owner', 'staff', 'admin', 'owner'],
+  CHECK_IN:      ['ticket_owner', 'staff', 'admin', 'owner'],
+  CANCEL:        ['ticket_owner', 'staff', 'admin', 'owner'],
+  CONFIRM_FREE:  ['anonymous', 'ticket_owner', 'staff', 'admin', 'owner'],
+  RELEASE_ALL:   ['staff', 'admin', 'owner'],
+  DISABLE_TABLE: ['admin', 'owner'],
+  // ...（全 22 コマンドを並べる。実物が出典）
+} as const satisfies Record<CommandType, readonly Role[]>;
 ```
 
-`dispatch` が適用前に必ず評価します。**ルート側で権限を判定しないでください。** スタッフ・管理者の操作は例外なく監査ログに残します。
+`dispatch` が適用前に必ず評価します。**ルート側で権限を判定しないでください**（`pnpm check:arch` が落とします）。スタッフ・管理者の操作は例外なく監査ログに残します。
+
+**`apply` はパッケージの外に公開しません。** 権限を通らずに状態を変える道を残さないためです（[ADR-0014](../docs/adr/0014-permissions-in-core.md)）。`core` が公開する入口は `dispatch` と `tick` の 2 つです。
 
 **(5) API 契約 DSL — Zod**
 

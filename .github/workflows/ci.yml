@@ -111,6 +111,21 @@ jobs:
           echo "検査は違反を正しく検知した。"
           rm packages/shared/src/__ci_violation.ts
 
+      - name: ルート層が権限を判定したことを検知できることを確かめる
+        run: |
+          mkdir -p apps/server/routes
+          cat > apps/server/routes/__ci_violation.ts <<'EOF4'
+          export function handle(role: string): boolean {
+            return role === 'staff';
+          }
+          EOF4
+          if node scripts/check-architecture.mjs; then
+            echo "::error::検査が違反を見逃した。scripts/check-architecture.mjs を確認すること。"
+            exit 1
+          fi
+          echo "検査は違反を正しく検知した。"
+          rm -r apps/server/routes
+
       - name: シミュレータの読み書きが入口の外に出たことを検知できることを確かめる
         run: |
           cat > packages/core/sim/__ci_violation.ts <<'EOF2'
