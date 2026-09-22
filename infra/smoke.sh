@@ -33,7 +33,7 @@ fail() {
 # 記録が残っていれば「作り直していない」ことが席の数に出る。
 start() {
   docker run -d --name "$NAME" -p "${PORT}:8080" -v "${VOLUME}:/data" \
-    -e VENUE_ID=smoke -e SEED_TABLES="$1" "$IMAGE" >/dev/null
+    -e VENUE_ID=smoke -e SEED_TABLES="$1" -e SEED_OPEN=true "$IMAGE" >/dev/null
 }
 
 # 起きるまで待つ。健康を答えられるようになったら次へ進む。
@@ -67,6 +67,33 @@ TABLES="$(field tables)"
 [ "$TABLES" = "4" ] || fail "席が 4 つ作られていない（$TABLES）"
 echo "OK  施設と席ができた（$TABLES 席）"
 
+# ---- 受付から、チケットを読むまで（9.7） ----
+
+SECRET="smoke-secret-0123456789"
+JOINED="$(curl -fsS -X POST "${BASE}/api/v/smoke/tickets" \
+  -H 'content-type: application/json' \
+  -H 'idempotency-key: smoke-join-0001' \
+  -H 'x-openseat-client: smoke-device-0123456789' \
+  -d "{\"partySize\":2,\"secret\":\"${SECRET}\"}")" || fail "受付できない"
+
+# **秘密パラメータが返しに混ざっていないこと**（9.8）。
+case "$JOINED" in
+  *"$SECRET"*) fail "返しに秘密パラメータが混ざっている" ;;
+esac
+echo "OK  受付できた（返しに秘密は混ざっていない）"
+
+TICKET="$(printf '%s' "$JOINED" | node -e \
+  "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).ticket.id))")"
+[ -n "$TICKET" ] || fail "チケットの識別子が返っていない"
+
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/t/${TICKET}?k=${SECRET}")"
+[ "$CODE" = "200" ] || fail "本人がチケットを読めない（$CODE）"
+echo "OK  本人はチケットを読める"
+
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/t/${TICKET}?k=wrong-secret-000000")"
+[ "$CODE" = "403" ] || fail "他人がチケットを読めてしまう（$CODE）"
+echo "OK  他人は読めない"
+
 # ---- 2 回目: 席の数を変えて作り直す ----
 #
 # **記録が残っていれば、施設はもうあるので作り直さない。** 席は 4 つのままになる。
@@ -79,6 +106,10 @@ wait_healthy
 AFTER="$(field tables)"
 [ "$AFTER" = "4" ] || fail "コンテナを作り直したら記録が消えた（席 $TABLES → $AFTER）"
 echo "OK  コンテナを作り直しても記録が残る（席 $AFTER のまま）"
+
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/t/${TICKET}?k=${SECRET}")"
+[ "$CODE" = "200" ] || fail "作り直したらチケットが読めなくなった（$CODE）"
+echo "OK  作り直してもチケットを読める"
 
 [ "$(field venue)" = "smoke" ] || fail "施設が入れ替わっている（$(field venue)）"
 echo "OK  同じ施設を読み戻している"

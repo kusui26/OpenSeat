@@ -61,12 +61,31 @@ export interface Commit {
   /** 適用した時刻。**サーバ時刻だけを信じる**（9.4）。 */
   readonly at: Timestamp;
   /**
+   * 新しく作られるチケットに付ける、`core` が持たない欄（9.8）。
+   *
+   * **受付と飛び込みのときだけ要る。** すでにあるチケットの行には触らない
+   * （`withoutKeys`）。**状態の変化と同じトランザクションで書く** —— 別にすると、
+   * 間で落ちたときに**秘密パラメータの無いチケット**が残り、本人が触れなくなる。
+   */
+  readonly identity: TicketIdentity | null;
+  /**
    * 同じコマンドが二度届いたときのための控え（[ADR-0015](../../../docs/adr/0015-idempotency-key.md)）。
    *
    * **状態の変化と同じトランザクションで書く。** 別々に書くと、間で落ちたときに
    * 「適用済みなのに控えが無い」状態が残り、送り直しで二度適用される。
    */
   readonly record: CommandRecord | null;
+}
+
+/**
+ * 新しいチケットの、`core` が持たない欄。
+ *
+ * **どちらもハッシュである。** 生の値はサーバに残さない（CLAUDE.md 7 章）。
+ */
+export interface TicketIdentity {
+  readonly ticketId: string;
+  readonly clientTokenHash: string | null;
+  readonly secretHash: string;
 }
 
 /**
@@ -127,6 +146,101 @@ export function loadVenueState(db: Db, venueId: string): VenueState | null {
 
 /** 書いた順。SQLite が行に振る連番で、更新しても動かない。 */
 const WRITTEN_ORDER = sql`rowid`;
+
+/** URL に出る短い名前から、施設の識別子を引く。 */
+export function findVenueBySlug(db: Db, slug: string): string | null {
+  const row = db.select({ id: venues.id }).from(venues).where(eq(venues.slug, slug)).get();
+  return row?.id ?? null;
+}
+
+/** 施設の、状態に入らない欄。画面の見出しと文言に使う（9.6）。 */
+export interface VenueProfile {
+  readonly id: string;
+  readonly slug: string;
+  readonly name: string;
+  readonly timezone: string;
+  readonly locale: string;
+}
+
+export function profileOf(db: Db, venueId: string): VenueProfile | null {
+  const row = db
+    .select({
+      id: venues.id,
+      slug: venues.slug,
+      name: venues.name,
+      timezone: venues.timezone,
+      locale: venues.locale,
+    })
+    .from(venues)
+    .where(eq(venues.id, venueId))
+    .get();
+  return row ?? null;
+}
+
+/**
+ * 座席 QR のトークンから、席の内部 ID を引く（7.8）。
+ *
+ * **外から席を指すのはトークンだけである。** 内部 ID を受け取る入口を作ると、
+ * QR を読まずに他人の席を指せてしまう。
+ */
+export function tableByToken(db: Db, venueId: string, token: string): string | null {
+  const row = db
+    .select({ id: tables.id })
+    .from(tables)
+    .where(and(eq(tables.venueId, venueId), eq(tables.token, token)))
+    .get();
+  return row?.id ?? null;
+}
+
+/** そのチケットを持っている施設。**URL にチケットしか無い入口**が引く（9.7）。 */
+export function venueOfTicket(db: Db, ticketId: string): string | null {
+  const row = db
+    .select({ venueId: tickets.venueId })
+    .from(tickets)
+    .where(eq(tickets.id, ticketId))
+    .get();
+  return row?.venueId ?? null;
+}
+
+/**
+ * そのチケットの、秘密パラメータのハッシュ（9.8）。
+ *
+ * **突き合わせるのは呼ぶ側である。** ここは読むだけで、一致の判定はしない
+ * （時間差で漏れないよう、定数時間で比べる必要がある）。
+ */
+export function secretHashOf(db: Db, venueId: string, ticketId: string): string | null {
+  const row = db
+    .select({ secretHash: tickets.secretHash })
+    .from(tickets)
+    .where(and(eq(tickets.venueId, venueId), eq(tickets.id, ticketId)))
+    .get();
+  return row?.secretHash ?? null;
+}
+
+/**
+ * その端末が、この 1 時間に受け付けた回数（7.16 の `join_rate_limit_per_hour`）。
+ *
+ * **チケットの行から数える。** 別に台帳を持つと、片方だけ消えたときに数が狂う。
+ */
+export function joinsSince(
+  db: Db,
+  venueId: string,
+  clientTokenHash: string,
+  since: Timestamp,
+): number {
+  const row = db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(tickets)
+    .where(
+      and(
+        eq(tickets.venueId, venueId),
+        eq(tickets.clientTokenHash, clientTokenHash),
+        gt(tickets.createdAt, since),
+      ),
+    )
+    .get();
+  return row?.count ?? 0;
+}
 
 /** ある番号より後のイベント。配信の追いつき（9.5）と統計が使う。 */
 export function readEvents(db: Db, venueId: string, afterSeq = 0): readonly DomainEvent[] {
@@ -355,7 +469,7 @@ function unchangedTable(before: VenueState, table: Table): boolean {
 function writeTickets(tx: Tx, change: Commit): void {
   const changed = change.after.tickets.filter((ticket) => !unchangedTicket(change.before, ticket));
   for (const ticket of writeOrder(change, changed)) {
-    upsertTicket(tx, encodeTicket(ticket, ticketKeys(change)));
+    upsertTicket(tx, encodeTicket(ticket, ticketKeys(change, ticket.id)));
   }
 }
 
@@ -382,13 +496,19 @@ function releasesTable(before: VenueState, ticket: Ticket): boolean {
 }
 
 /**
- * `core` が持たない欄は、前の行から引き継ぐ。
+ * `core` が持たない欄。
  *
- * 端末トークンのハッシュは受付のときに決まり、以後は変わらない。新しいチケットに
- * 付けるのは PR 5（匿名トークン）の仕事で、そこまでは `null` のままでよい。
+ * **新しいチケットのときだけ値が入る。** すでにある行では `withoutKeys` が
+ * これらを落とすので、前の値がそのまま残る（受付のときに決まり、以後は変わらない）。
  */
-function ticketKeys(change: Commit): TicketKeys {
-  return { venueId: change.after.venueId, clientTokenHash: null };
+function ticketKeys(change: Commit, ticketId: string): TicketKeys {
+  const identity: TicketIdentity | null = change.identity;
+  const mine: boolean = identity !== null && identity.ticketId === ticketId;
+  return {
+    venueId: change.after.venueId,
+    clientTokenHash: mine && identity !== null ? identity.clientTokenHash : null,
+    secretHash: mine && identity !== null ? identity.secretHash : null,
+  };
 }
 
 function upsertTicket(tx: Tx, row: TicketRow): void {
@@ -398,9 +518,16 @@ function upsertTicket(tx: Tx, row: TicketRow): void {
     .run();
 }
 
-/** 更新では触らない欄を落とす。施設は変わらず、端末トークンは受付のときだけ決まる。 */
-function withoutKeys(row: TicketRow): Omit<TicketRow, 'id' | 'venueId' | 'clientTokenHash'> {
-  const { id, venueId, clientTokenHash, ...rest } = row;
+/**
+ * 更新では触らない欄を落とす。
+ *
+ * 施設は変わらず、**端末トークンと秘密パラメータのハッシュは受付のときだけ**決まる。
+ * ここで落とさないと、2 回目以降の書き込みで `null` に潰れて**本人が触れなくなる**。
+ */
+function withoutKeys(
+  row: TicketRow,
+): Omit<TicketRow, 'id' | 'venueId' | 'clientTokenHash' | 'secretHash'> {
+  const { id, venueId, clientTokenHash, secretHash, ...rest } = row;
   return rest;
 }
 

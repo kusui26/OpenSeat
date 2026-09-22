@@ -8,10 +8,19 @@
  * 再デプロイしただけで座席 QR が全部無効になる（CLAUDE.md 8）。
  */
 
-import { createTable, createVenueState, DEFAULT_POLICY, type Timestamp } from '@openseat/core';
+import {
+  createTable,
+  createVenueState,
+  DEFAULT_POLICY,
+  dispatch,
+  member,
+  minutes,
+  type Timestamp,
+  type VenueState,
+} from '@openseat/core';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Db } from '../db/client.js';
-import { createVenue, insertTable, loadVenueState } from '../db/repository.js';
+import { commit, createVenue, insertTable, loadVenueState } from '../db/repository.js';
 import type { Config } from './config.js';
 
 /**
@@ -46,5 +55,33 @@ export function ensureVenue(db: Db, config: Config, now: Timestamp): boolean {
     insertTable(db, table, { venueId: config.venueId, zoneId: null, token: tableToken() });
   });
 
+  if (config.seedOpen) openVenue(db, config, now);
   return true;
 }
+
+/** 作ったばかりの施設を、運用中にする（足場。7.14）。 */
+function openVenue(db: Db, config: Config, now: Timestamp): void {
+  const before: VenueState | null = loadVenueState(db, config.venueId);
+  if (before === null) return;
+
+  const opened = dispatch(
+    before,
+    member('staff', 'seed'),
+    { type: 'OPEN', closesAt: now + minutes(SEED_OPEN_MIN), by: 'staff' },
+    now,
+  );
+  if (!opened.ok) throw new Error(`施設を開けません: ${opened.error.code}`);
+
+  commit(db, {
+    before,
+    after: opened.value.state,
+    events: opened.value.events,
+    actor: member('staff', 'seed'),
+    at: now,
+    record: null,
+    identity: null,
+  });
+}
+
+/** 足場で開けたときの営業時間。**手で閉じるまで、というのは足場らしくない。** */
+const SEED_OPEN_MIN = 12 * 60;

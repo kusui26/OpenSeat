@@ -23,13 +23,17 @@ WORKDIR /repo
 # この層が使い回されるので、組み立てが速い。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/
+COPY packages/shared/package.json packages/shared/
 COPY apps/server/package.json apps/server/
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core packages/core
+COPY packages/shared packages/shared
 COPY apps/server apps/server
-RUN pnpm --filter @openseat/core build && pnpm --filter "./${APP}" build
+RUN pnpm --filter @openseat/core build \
+ && pnpm --filter @openseat/shared build \
+ && pnpm --filter "./${APP}" build
 
 # **本番に要るものだけを取り出す。** `--prod` で開発用の依存を落とし、
 # ワークスペースの依存は実体として置かれる（`--legacy` を使わない理由）。

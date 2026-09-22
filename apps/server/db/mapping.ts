@@ -141,6 +141,8 @@ export const MAPPING: Readonly<Record<string, TableMapping>> = {
       still_here_asked_at: 'core の Ticket.stillHereAskedAt。「まだご利用中ですか」を出した時刻（7.11）',
       still_here_answered_at: 'core の Ticket.stillHereAnsweredAt。その答えが返った時刻',
       time_limit_noticed_at: 'core の Ticket.timeLimitNoticedAt。「目安時間になりました」を出した時刻（7.10）',
+      secret_hash:
+        'チケット URL の秘密パラメータのハッシュ（9.8）。9.6 は client_token_hash しか挙げていないが、本人性はこの 2 つで扱う',
     },
   },
 

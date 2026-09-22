@@ -4,7 +4,9 @@
  * **ここが境界の中心である。** 設定を読み、データベースを開き、施設アクターを
  * 起こし、HTTP を待ち受ける。業務判断は 1 行も書かない（CLAUDE.md 3.1）。
  *
- * **API はまだ `/healthz` だけである。** 利用者の入口は PR 5 から入る。それまでの
+ * **利用者の API は [`routes/`](../routes/index.ts) にある**（9.7）。座席 QR の分岐は
+ * PR 10、ボードは PR 11、スタッフと管理は PR 12 以降で足す。
+ *
  * `/healthz` は、外形監視と置き場のヘルスチェックに加えて、**運用の目（`tick` の
  * 遅れ）** と、**「落として起こし直しても記録が残っているか」を確かめる窓**
  * （`infra/smoke.sh`）を兼ねる。
@@ -15,7 +17,9 @@ import { Hono } from 'hono';
 import process from 'node:process';
 import { open, type Connection } from '../db/client.js';
 import { loadVenueState, migrationCount } from '../db/repository.js';
-import { openVenueActor, TickFailed, type VenueActor } from '../venue/actor.js';
+import { TickFailed, type VenueActor } from '../venue/actor.js';
+import { openRegistry, type Registry } from '../venue/registry.js';
+import { userApi } from './api.js';
 import { readConfig, type Config } from './config.js';
 import { ensureVenue } from './seed.js';
 
@@ -35,12 +39,19 @@ console.log(
     : `施設 ${config.venueId} を読み込みました`,
 );
 
-/** **起動時の復元はここで終わる。** 行から状態を組み立てる（ADR-0013）。 */
-const actor: VenueActor = openVenueActor({
-  db: connection.db,
-  venueId: config.venueId,
-  clock: () => Date.now(),
-});
+/**
+ * 施設ごとに 1 つのアクター（9.4）。
+ *
+ * **起動時の復元は、最初に引いたときに終わる。** 行から状態を組み立てる（ADR-0013）。
+ */
+const registry: Registry = openRegistry({ db: connection.db, clock: () => Date.now() });
+const actor: VenueActor = mustFind(config.venueId);
+
+function mustFind(slug: string): VenueActor {
+  const found: VenueActor | null = registry.find(slug);
+  if (found === null) throw new Error(`施設 ${slug} を起こせません`);
+  return found;
+}
 
 /**
  * 10 秒ごとに時刻を進める（9.4）。
@@ -52,13 +63,15 @@ const actor: VenueActor = openVenueActor({
  * ことはないので、断りは必ず実装の誤りである（CLAUDE.md 6）。
  */
 const ticker = setInterval(() => {
-  void actor.advance().catch((error: unknown) => {
-    if (error instanceof TickFailed) {
-      console.error(`tick が拒否されました: ${error.rejection.code} ${error.rejection.describe}`);
-      return;
-    }
-    console.error('tick で予期しない失敗:', error);
-  });
+  for (const venue of registry.all()) {
+    void venue.advance().catch((error: unknown) => {
+      if (error instanceof TickFailed) {
+        console.error(`tick が拒否されました: ${error.rejection.code} ${error.rejection.describe}`);
+        return;
+      }
+      console.error('tick で予期しない失敗:', error);
+    });
+  }
 }, TICK_INTERVAL_MS);
 
 /**
@@ -93,6 +106,9 @@ function health(now: number): Record<string, unknown> {
 }
 
 const app = new Hono();
+
+/** 利用者の API（9.7）。**契約は `packages/shared` が唯一の出典である。** */
+app.route('/', userApi({ db: connection.db, registry, clock: () => Date.now() }));
 
 /**
  * **答えられないときは 200 を返さない。** 置き場のヘルスチェックも外形監視も

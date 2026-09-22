@@ -1,0 +1,1 @@
+ALTER TABLE `tickets` ADD `secret_hash` text;
