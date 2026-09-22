@@ -1,6 +1,8 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # 通しの筋書き（Playwright）。**コンテナには入らない。**
+  - "e2e"
 
 # 依存のビルドスクリプトは既定で実行されない。実行を許可するものだけを列挙する。
 # 新しい依存を足してビルドスクリプトを許可するときは、
@@ -11,6 +13,10 @@ packages:
 # better-sqlite3: **スクリプトは要らない。** 13 系は musl を含む 8 つの prebuilt を
 # パッケージに同梱していて、読み込み時にその場で選ぶ。install スクリプト自体が
 # 存在しないので、許可しない（ADR-0012）。
+#
+# @playwright/test: ブラウザの本体は別に取ってくる（`playwright install`）。
+# ここで許可するのは、実行ファイルの place だけである。
 allowBuilds:
   better-sqlite3: false
   esbuild: true
+  '@playwright/test': true

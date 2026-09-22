@@ -143,6 +143,50 @@ jobs:
   # 成果物は「1 つのコンテナ」なので（ADR-0005）、組み上がることを CI で確かめる。
   # 開発者の手元では Docker Desktop のイメージ取得が止まって確かめられなかった
   # （docs/260921_report_spike.md の 3.1）。ここが通れば、その未知が閉じる。
+  # 受付から退席までを、実際のブラウザで通す（9.12）。
+  #
+  # **単体でも結合でも捕まえられないのは「配線」である。** CSP、画面の中の道、
+  # `fetch`、配信、Service Worker —— どれも組み合わせたときにだけ壊れる。
+  e2e:
+    name: 受付から退席まで通る（ブラウザ）
+    runs-on: ubuntu-latest
+    # **5 分を超えないこと**（Phase 2 プラン PR 8）。超えるなら筋書きを減らす。
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: pnpm を用意する
+        uses: pnpm/action-setup@v4
+
+      - name: Node を用意する
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 依存をインストールする
+        run: pnpm install --frozen-lockfile
+
+      # **本物の組み上がりに当てる。** 開発用の配信ではなく、コンテナに入るものと
+      # 同じ形（`apps/web/dist`）をサーバが配る。
+      - name: 組み立てる
+        run: pnpm build:apps
+
+      - name: ブラウザを取ってくる
+        run: pnpm --filter @openseat/e2e install:browsers
+
+      - name: 通す
+        run: pnpm --filter @openseat/e2e test
+
+      - name: 落ちたときの記録を残す
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-trace
+          path: e2e/test-results/
+          retention-days: 7
+
   image:
     name: コンテナが組み上がり、通しで動く
     runs-on: ubuntu-latest

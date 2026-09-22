@@ -19,8 +19,8 @@
  * だけで、**取りに行く間隔を決めるのは画面の側**である。
  */
 
-import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import type { Checks } from './api.ts';
 import { connect, type OpenSocket } from './live.ts';
 
@@ -38,7 +38,12 @@ export interface UseLiveParams<T extends Timed> {
   readonly checks: Checks<T>;
   /** どの答えを置き換えるか。 */
   readonly queryKey: readonly unknown[];
-  /** 接続の作り方。**テストでは偽物を渡す。** */
+  /**
+   * 接続の作り方。**テストでは偽物を渡す。**
+   *
+   * **描くたびに作り直さないこと。** ここが変わると繋ぎ直す（そういう約束に
+   * してある）。本番は渡さないので、この約束は画面に影響しない。
+   */
   readonly open?: OpenSocket;
 }
 
@@ -69,28 +74,43 @@ function timed(value: unknown): value is Timed {
 export function useLive<T extends Timed>(params: UseLiveParams<T>): boolean {
   const cache = useQueryClient();
   const [live, setLive] = useState(false);
-  const { url, event, checks, queryKey, open } = params;
-  const key: string = JSON.stringify(queryKey);
+  const { url, event, open } = params;
+
+  /**
+   * **描くたびに作り直されるものを、繋ぎ直しの理由にしない。**
+   *
+   * `queryKey` は配列、`checks` はスキーマで、どちらも呼ぶ側がその場で組み立てる。
+   * これを下の並びに入れると、**描き直すたびに繋ぎ直す** —— 届いた 1 通が描き
+   * 直しを起こし、それがまた繋ぎ直しを起こす、という輪になる。実際、1 つの筋書きで
+   * **127 本**の接続が張られていた（PR 8 の通しで見つけた）。
+   */
+  const latest = useRef(params);
+  latest.current = params;
+
+  /** 並べるのは**変わったら繋ぎ直すべきもの**だけ。`queryKey` は中身で見る。 */
+  const key: string = JSON.stringify(params.queryKey);
 
   useEffect(() => {
     if (url === null) return;
-    return connect({
-      url,
-      event,
-      // `exactOptionalPropertyTypes` のため、無いときは欄ごと置かない。
-      ...(open === undefined ? {} : { open }),
-      onLive: setLive,
-      onMessage: (data) => {
-        const fresh: T | null = read(checks, data);
-        // 古いものを捨てるのは `LIVE_QUERY` の仕事。**ここでは書くだけ。**
-        if (fresh !== null) cache.setQueryData<T>(queryKey, fresh);
-      },
-    });
-    // 並びそのものではなく**中身**で見る（`queryKey` は毎回作り直されるので、
-    // そのまま並べると、描くたびにつなぎ直すことになる）。
-  }, [url, event, key, open, cache, checks, queryKey]);
+    const onMessage = (data: string): void => {
+      keep(cache, latest.current, data);
+    };
+    // `exactOptionalPropertyTypes` のため、無いときは欄ごと置かない。
+    const how = open === undefined ? {} : { open };
+    return connect({ url, event, onLive: setLive, onMessage, ...how });
+  }, [url, event, key, open, cache]);
 
   return url !== null && live;
+}
+
+/** 届いた 1 通を、手元に置く。**古いものを捨てるのは `LIVE_QUERY` の仕事。** */
+function keep<T extends Timed>(
+  cache: QueryClient,
+  params: UseLiveParams<T>,
+  data: string,
+): void {
+  const fresh: T | null = read(params.checks, data);
+  if (fresh !== null) cache.setQueryData<T>(params.queryKey, fresh);
 }
 
 /**

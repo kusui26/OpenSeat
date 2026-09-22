@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+
+    // ここは境界である。サーバを起こし、ファイルを開き、プロセスの合図を受ける。
+    "types": ["node"],
+
+    // **Node がそのまま走らせる**（22 の型剥がし）。だから拡張子まで書く。
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true
+  },
+
+  // **置き場所を数え上げない**（`apps/server/tsconfig.json` と同じ理由）。
+  "include": ["**/*.ts"],
+  "exclude": ["test-results", "playwright-report"]
+}
