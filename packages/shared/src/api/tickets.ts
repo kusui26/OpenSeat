@@ -16,7 +16,7 @@ import {
   TicketId,
   TicketSecret,
 } from '../values.js';
-import { ServerTime, TicketView, WaitEstimate } from './views.js';
+import { ServerTime, TicketView } from './views.js';
 
 // ---- 受付（`POST /api/v/{venue}/tickets`） ----
 
@@ -32,6 +32,23 @@ export const JoinRequest = z.object({
   partySize: PartySize,
   /** 車いす対応席など。**順番は早めない**（7.6）。 */
   requiredTags: Tags.default([]),
+  /**
+   * チケット URL の秘密パラメータ（9.8）。**画面が作って送る。**
+   *
+   * ## なぜサーバが作らないのか
+   *
+   * **送り直しに同じ秘密を返せないからである。** 冪等キーの控えは結末だけで、
+   * 応答そのものを持たない（[ADR-0015](../../../../docs/adr/0015-idempotency-key.md)）。
+   * サーバが作ると、1 回目の応答が失われたとき、**送り直しても秘密が分からず、
+   * そのチケットに二度と触れなくなる。**
+   *
+   * 画面が作れば、送り直しても手元にある。**サーバは保存時にハッシュ化する**ので、
+   * 生の値を持つのは画面だけになる（CLAUDE.md 7 章）。冪等キーと匿名トークンも
+   * 画面が作っており、考え方は同じである。
+   *
+   * **推測不能な乱数にすること**（`crypto.getRandomValues`）。
+   */
+  secret: TicketSecret,
 });
 
 export type JoinRequest = z.infer<typeof JoinRequest>;
@@ -39,13 +56,11 @@ export type JoinRequest = z.infer<typeof JoinRequest>;
 /**
  * 受付の返し。
  *
- * **秘密パラメータはここでしか返さない**（9.8）。以後の呼び出しでは、これを
- * `?k=` に載せて本人性を示す。**ログにも、ほかのどの返しにも現れない**
- * （CLAUDE.md 7 章）。
+ * **秘密パラメータは返さない。** 送ったのは画面のほうなので、返す必要が無い。
+ * 返さなければ、**応答のログにも履歴にも現れない**（CLAUDE.md 7 章）。
  */
 export const JoinResponse = ServerTime.extend({
   ticket: TicketView,
-  secret: TicketSecret.describe('チケット URL の秘密パラメータ。保存も転送もしないこと'),
 });
 
 export type JoinResponse = z.infer<typeof JoinResponse>;
@@ -55,10 +70,14 @@ export type JoinResponse = z.infer<typeof JoinResponse>;
 export const TicketPath = z.object({ ticket: TicketId });
 export const TicketQuery = z.object({ k: TicketSecret });
 
+/**
+ * チケットの状態。
+ *
+ * **目安は `ticket.eta` に入っている。** 保留中の人にも「準備OK を押したら
+ * どれくらいか」が返るので（`core` の `estimateForTicket`）、外に出し直さない。
+ */
 export const TicketResponse = ServerTime.extend({
   ticket: TicketView,
-  /** 施設の混み具合。「いま準備OK を押したらどれくらいか」の判断に使う。 */
-  eta: WaitEstimate,
 });
 
 export type TicketResponse = z.infer<typeof TicketResponse>;
@@ -135,7 +154,6 @@ export type TicketActionRequest = z.infer<typeof TicketActionRequest>;
  */
 export const TicketActionResponse = ServerTime.extend({
   ticket: TicketView,
-  eta: WaitEstimate,
 });
 
 export type TicketActionResponse = z.infer<typeof TicketActionResponse>;

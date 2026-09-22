@@ -18,6 +18,8 @@ services:
       VENUE_ID: demo
       # まだ施設が無ければ、この数だけ席を作る。**席の一覧編集は PR 13。**
       SEED_TABLES: 8
+      # 作った施設を、そのまま運用中にする。**運用の開始と終了は PR 14。**
+      SEED_OPEN: "true"
       # 版を画面に出すためだけのもの。Railway では GIT_SHA が入る。
       GIT_SHA: local
     volumes:

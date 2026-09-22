@@ -40,7 +40,13 @@ let keySeq = 0;
 /** 鍵は画面が作る。テストでは連番でよい。 */
 function request(command: Command, actor: Actor = ANONYMOUS): CommandRequest {
   keySeq += 1;
-  return { actor, command, key: `k-${String(keySeq)}` };
+  return { actor, command, key: `k-${String(keySeq)}`, identity: identityFor(command) };
+}
+
+/** 受付と飛び込みには、秘密パラメータのハッシュが要る（9.8）。 */
+function identityFor(command: Command): CommandRequest['identity'] {
+  if (command.type !== 'JOIN' && command.type !== 'WALK_IN') return null;
+  return { ticketId: command.ticketId, clientTokenHash: 'hash-of-device', secretHash: 'hash-of-secret' };
 }
 
 function joinOf(id: string, partySize = 2): Command {
@@ -103,7 +109,12 @@ describe('送り直しで、二度適用しない', () => {
     await actor.send(request({ type: 'OPEN', closesAt: at(480), by: 'staff' }, STAFF));
 
     now = at(1);
-    const send: CommandRequest = { actor: ANONYMOUS, command: joinOf('a'), key: 'same' };
+    const send: CommandRequest = {
+      actor: ANONYMOUS,
+      command: joinOf('a'),
+      key: 'same',
+      identity: identityFor(joinOf('a')),
+    };
     const first = await actor.send(send);
     const second = await actor.send(send);
 
@@ -117,7 +128,12 @@ describe('送り直しで、二度適用しない', () => {
     await actor.send(request({ type: 'OPEN', closesAt: at(480), by: 'staff' }, STAFF));
 
     now = at(1);
-    const send: CommandRequest = { actor: ANONYMOUS, command: joinOf('a'), key: 'same' };
+    const send: CommandRequest = {
+      actor: ANONYMOUS,
+      command: joinOf('a'),
+      key: 'same',
+      identity: identityFor(joinOf('a')),
+    };
     await actor.send(send);
     const again = await actor.send(send);
 
@@ -135,7 +151,12 @@ describe('送り直しで、二度適用しない', () => {
   it('断られた結末も、送り直しで同じものが返る', async () => {
     const actor = actorOn();
     // 運用していないので受付は断られる。
-    const send: CommandRequest = { actor: ANONYMOUS, command: joinOf('a'), key: 'same' };
+    const send: CommandRequest = {
+      actor: ANONYMOUS,
+      command: joinOf('a'),
+      key: 'same',
+      identity: identityFor(joinOf('a')),
+    };
     const first = await actor.send(send);
     const second = await actor.send(send);
 
@@ -157,6 +178,7 @@ describe('送り直しで、二度適用しない', () => {
       actor: STAFF,
       command: { type: 'CLOSE', by: 'user' },
       key: 'defect',
+      identity: null,
     };
     const first = await actor.send(broken);
 
@@ -169,8 +191,8 @@ describe('送り直しで、二度適用しない', () => {
     await actor.send(request({ type: 'OPEN', closesAt: at(480), by: 'staff' }, STAFF));
 
     now = at(1);
-    await actor.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'one' });
-    await actor.send({ actor: ANONYMOUS, command: joinOf('b'), key: 'two' });
+    await actor.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'one', identity: identityFor(joinOf('a')) });
+    await actor.send({ actor: ANONYMOUS, command: joinOf('b'), key: 'two', identity: identityFor(joinOf('b')) });
 
     expect(actor.state().tickets).toHaveLength(2);
   });
@@ -197,11 +219,16 @@ describe('落ちても取り戻せる', () => {
     const first = actorOn();
     await first.send(request({ type: 'OPEN', closesAt: at(480), by: 'staff' }, STAFF));
     now = at(1);
-    await first.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'same' });
+    await first.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'same', identity: identityFor(joinOf('a')) });
 
     db = box.reopen();
     const second = actorOn();
-    const again = await second.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'same' });
+    const again = await second.send({
+      actor: ANONYMOUS,
+      command: joinOf('a'),
+      key: 'same',
+      identity: identityFor(joinOf('a')),
+    });
 
     expect(again.kind).toBe('replayed');
     expect(second.state().tickets).toHaveLength(1);
@@ -297,7 +324,7 @@ describe('時刻を進める', () => {
     const actor = actorOn();
     await actor.send(request({ type: 'OPEN', closesAt: at(480), by: 'staff' }, STAFF));
     now = at(1);
-    await actor.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'old' });
+    await actor.send({ actor: ANONYMOUS, command: joinOf('a'), key: 'old', identity: identityFor(joinOf('a')) });
     expect(findRecord(db, VENUE_ID, 'old')).not.toBeNull();
 
     now = at(1) + RECORD_TTL_MS + minutes(1);

@@ -416,6 +416,7 @@ export function encodeTicket(ticket: Ticket, keys: TicketKeys): TicketRow {
   return {
     venueId: keys.venueId,
     clientTokenHash: keys.clientTokenHash,
+    secretHash: keys.secretHash,
     ...encodeIdentity(ticket),
     ...encodeProgress(ticket),
     ...encodePresence(ticket),
@@ -469,10 +470,16 @@ function encodeCounters(ticket: Ticket): Counters {
   };
 }
 
-/** `core` が持たない チケットの欄。端末トークンはハッシュだけがここを通る。 */
+/**
+ * `core` が持たない チケットの欄。
+ *
+ * **生の秘密はここを通らない。** 端末の匿名トークンも、チケット URL の秘密
+ * パラメータも、**ハッシュだけ**が渡る（9.8、CLAUDE.md 7 章）。
+ */
 export interface TicketKeys {
   readonly venueId: string;
   readonly clientTokenHash: string | null;
+  readonly secretHash: string | null;
 }
 
 // ---- 施設の状態 ----

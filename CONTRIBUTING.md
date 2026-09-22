@@ -100,6 +100,21 @@ pnpm --filter @openseat/server db:generate        # スキーマを変えたら�
 
 `/healthz` が `tickLagMs` を返します。**10 秒ごとに進めるので、0〜10 秒を行き来するのが正常**です。
 
+### 利用者の API
+
+[`apps/server/routes`](apps/server/routes) にあります（[開発プラン 9.7](docs/260916_plan_OpenSeat.md)）。**ハンドラがしてよいのは 5 つだけ**です（[CLAUDE.md 3.1](.claude/CLAUDE.md)）。
+
+1. 入力の検証（Zod） 2. 実行者の特定 3. コマンドの組み立て 4. アクターへ委譲 5. 結果の整形
+
+ハンドラに `if (ticket.state === 'CALLED')` が現れたら設計の誤りです。**権限の判定も書きません**（`core` の表が決めます。[ADR-0014](docs/adr/0014-permissions-in-core.md)）。`pnpm check:arch` が落とします。
+
+**秘密の扱い**（9.8、CLAUDE.md 7 章）。
+
+- **画面が作り、サーバはハッシュだけを保存します。** 端末の匿名トークンも、チケット URL の秘密パラメータも
+- **記録には識別子ごと出しません。** 残すのは道の形（`/api/t/:ticket`）だけです
+- **`Referrer-Policy: no-referrer`。** チケットの URL に秘密が乗っているので、外部へ参照元を送りません
+- **よそのサイトからの書き込みは `Origin` を照合して断ります**（CSRF。トークンは配りません）
+
 ### API の契約
 
 すべての入口は [`packages/shared`](packages/shared) に Zod で宣言してあります（[開発プラン 9.7](docs/260916_plan_OpenSeat.md)）。**型は `z.infer` で導き、同じ形を手で書きません。**

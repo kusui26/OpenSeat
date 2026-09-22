@@ -235,6 +235,17 @@ export const tickets = sqliteTable(
      */
     clientTokenHash: text('client_token_hash'),
 
+    /**
+     * チケット URL の秘密パラメータ（`?k=`）のハッシュ（9.8、CLAUDE.md 7）。
+     *
+     * **生の値は保存しない。** 返すのは受付のとき 1 度だけで、以後は届いた値を
+     * ハッシュして突き合わせる。**ログにも、ほかのどの返しにも現れない。**
+     *
+     * パスワードと違って**推測不能な乱数**（128 ビット）なので、遅いハッシュ
+     * （argon2）は要らない。総当たりが成り立たないためである。
+     */
+    secretHash: text('secret_hash'),
+
     // ---- ここから下は `core` の `Ticket` ----
     code: text('code').notNull(),
     partySize: integer('party_size').notNull(),

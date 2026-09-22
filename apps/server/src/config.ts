@@ -25,6 +25,14 @@ export interface Config {
    * 席が 1 つも無い状態になってしまい、通し確認（`infra/smoke.sh`）が何も見られない。
    */
   readonly seedTables: number;
+  /**
+   * 作った施設を、そのまま運用中にするか。
+   *
+   * **足場である。** 運用の開始はスタッフの操作か、曜日と時間帯の設定で決まる
+   * （7.14）。その入口は PR 14 で入るので、それまで手元とコンテナの通し確認が
+   * 何も試せない。**すでにある施設には効かない。**
+   */
+  readonly seedOpen: boolean;
   /** 画面に出す版。Railway が `RAILWAY_GIT_COMMIT_SHA` を入れる。 */
   readonly revision: string;
 }
@@ -36,6 +44,7 @@ const DEFAULTS = {
   venueId: 'demo',
   venueName: 'OpenSeat',
   seedTables: 0,
+  seedOpen: false,
   revision: 'dev',
 } as const satisfies Config;
 
@@ -54,6 +63,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     venueId: env['VENUE_ID'] ?? DEFAULTS.venueId,
     venueName: env['VENUE_NAME'] ?? DEFAULTS.venueName,
     seedTables: number(env['SEED_TABLES'], DEFAULTS.seedTables),
+    seedOpen: env['SEED_OPEN'] === 'true',
     revision: env['GIT_SHA'] ?? DEFAULTS.revision,
   };
 }

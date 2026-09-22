@@ -48,6 +48,7 @@ import {
   pruneRecords,
   recordRejection,
   type CommandRecord,
+  type TicketIdentity,
 } from '../db/repository.js';
 import { serialiser } from './serialiser.js';
 
@@ -67,6 +68,14 @@ export interface CommandRequest {
    * 省ける形にしない。**付け忘れると二度適用される**ので、型で必ず書かせる。
    */
   readonly key: string;
+  /**
+   * 新しく作られるチケットに付ける、`core` が持たない欄（9.8）。
+   *
+   * **受付（`JOIN`）と飛び込み（`WALK_IN`）のときだけ要る。** ほかは `null`。
+   * 付け忘れると**秘密パラメータの無いチケット**ができ、本人が触れなくなるので、
+   * ここも省ける形にしない。
+   */
+  readonly identity: TicketIdentity | null;
 }
 
 /** コマンド 1 件の結末。 */
@@ -147,7 +156,14 @@ class Venue {
     events: readonly DomainEvent[],
     now: Timestamp,
   ): CommandOutcome {
-    this.write(next, events, request.actor, now, recordOf(request, true, null, now));
+    this.write({
+      next,
+      events,
+      actor: request.actor,
+      now,
+      record: recordOf(request, true, null, now),
+      identity: request.identity,
+    });
     return { kind: 'applied', state: next, events };
   }
 
@@ -174,20 +190,29 @@ class Venue {
     }
     this.lastTick = now;
     if (decided.value.events.length === 0 && decided.value.state === this.state) return;
-    this.write(decided.value.state, decided.value.events, null, now, null);
+    this.write({
+      next: decided.value.state,
+      events: decided.value.events,
+      actor: null,
+      now,
+      record: null,
+      identity: null,
+    });
   }
 
   /** 記録してから配信する。**順番を入れ替えない**（9.4）。 */
-  private write(
-    next: VenueState,
-    events: readonly DomainEvent[],
-    actor: Actor | null,
-    now: Timestamp,
-    record: CommandRecord | null,
-  ): void {
-    commit(this.db, { before: this.state, after: next, events, actor, at: now, record });
-    this.state = next;
-    for (const listener of this.listeners) listener(events, next);
+  private write(change: Written): void {
+    commit(this.db, {
+      before: this.state,
+      after: change.next,
+      events: change.events,
+      actor: change.actor,
+      at: change.now,
+      record: change.record,
+      identity: change.identity,
+    });
+    this.state = change.next;
+    for (const listener of this.listeners) listener(change.events, change.next);
   }
 
   /** 古い控えを捨てる（24 時間。ADR-0015）。 */
@@ -196,6 +221,16 @@ class Venue {
     this.lastPrune = now;
     pruneRecords(this.db, now - RECORD_TTL_MS);
   }
+}
+
+/** 1 回ぶんの書き込み。引数が増えてきたのでまとめてある。 */
+interface Written {
+  readonly next: VenueState;
+  readonly events: readonly DomainEvent[];
+  readonly actor: Actor | null;
+  readonly now: Timestamp;
+  readonly record: CommandRecord | null;
+  readonly identity: TicketIdentity | null;
 }
 
 export interface OpenActorParams {

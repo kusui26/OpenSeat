@@ -159,7 +159,15 @@ function record(
   actor: Actor | null,
   at: Timestamp,
 ): VenueState {
-  commit(db, { before, after: decided.state, events: decided.events, actor, at, record: null });
+  commit(db, {
+    before,
+    after: decided.state,
+    events: decided.events,
+    actor,
+    at,
+    record: null,
+    identity: null,
+  });
   return decided.state;
 }
 

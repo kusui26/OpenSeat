@@ -245,6 +245,9 @@ async function checkRouteBoundaries() {
   const problems = [];
   for (const directory of ROUTE_DIRECTORIES) {
     for (const file of await collectSources(join(ROOT, directory))) {
+      // テストは対象外。**本物の記録を用意して通しで試す**のが仕事なので、
+      // 永続化に触れてよい（ほかの検査と同じ扱い）。
+      if (isTest(file)) continue;
       problems.push(...scan(file, await readFile(file, 'utf8'), FORBIDDEN_IN_ROUTES));
     }
   }

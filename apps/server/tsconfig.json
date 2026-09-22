@@ -14,9 +14,12 @@
 
   // **テストも型検査に含める。** 外れていると、型の合わないテストが
   // 「走るけれど検査されない」状態になる（`pnpm typecheck` が見る）。
-  "include": ["src/**/*.ts", "db/**/*.ts", "venue/**/*.ts"],
+  "include": ["src/**/*.ts", "db/**/*.ts", "venue/**/*.ts", "routes/**/*.ts"],
 
   // **使うものだけを参照する。** コンテナが写すものと揃えること（`infra/Dockerfile`）。
   // 使っていないものを参照すると、組み立てがファイルを見つけられずに落ちる。
-  "references": [{ "path": "../../packages/core/tsconfig.build.json" }]
+  "references": [
+    { "path": "../../packages/core/tsconfig.build.json" },
+    { "path": "../../packages/shared/tsconfig.build.json" }
+  ]
 }

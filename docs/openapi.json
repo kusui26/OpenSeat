@@ -88,10 +88,16 @@
                       "minLength": 1,
                       "maxLength": 32
                     }
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128
                   }
                 },
                 "required": [
-                  "partySize"
+                  "partySize",
+                  "secret"
                 ]
               }
             }
@@ -112,18 +118,11 @@
                     },
                     "ticket": {
                       "$ref": "#/components/schemas/TicketView"
-                    },
-                    "secret": {
-                      "type": "string",
-                      "minLength": 16,
-                      "maxLength": 128,
-                      "description": "チケット URL の秘密パラメータ。保存も転送もしないこと"
                     }
                   },
                   "required": [
                     "serverNow",
-                    "ticket",
-                    "secret"
+                    "ticket"
                   ],
                   "additionalProperties": false
                 }
@@ -227,15 +226,11 @@
                     },
                     "ticket": {
                       "$ref": "#/components/schemas/TicketView"
-                    },
-                    "eta": {
-                      "$ref": "#/components/schemas/WaitEstimate"
                     }
                   },
                   "required": [
                     "serverNow",
-                    "ticket",
-                    "eta"
+                    "ticket"
                   ],
                   "additionalProperties": false
                 }
@@ -549,15 +544,11 @@
                     },
                     "ticket": {
                       "$ref": "#/components/schemas/TicketView"
-                    },
-                    "eta": {
-                      "$ref": "#/components/schemas/WaitEstimate"
                     }
                   },
                   "required": [
                     "serverNow",
-                    "ticket",
-                    "eta"
+                    "ticket"
                   ],
                   "additionalProperties": false
                 }
@@ -915,10 +906,16 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 99
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128
                   }
                 },
                 "required": [
-                  "partySize"
+                  "partySize",
+                  "secret"
                 ]
               }
             }
@@ -939,18 +936,11 @@
                     },
                     "ticket": {
                       "$ref": "#/components/schemas/TicketView"
-                    },
-                    "secret": {
-                      "type": "string",
-                      "minLength": 16,
-                      "maxLength": 128,
-                      "description": "チケット URL の秘密パラメータ。保存も転送もしないこと"
                     }
                   },
                   "required": [
                     "serverNow",
-                    "ticket",
-                    "secret"
+                    "ticket"
                   ],
                   "additionalProperties": false
                 }

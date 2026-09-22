@@ -84,7 +84,11 @@ export type TableScanResponse = z.infer<typeof TableScanResponse>;
  * これで (a) 待ちがない時間帯でも占有状況が正確になり、(b) 登録した人が守られ、
  * (c)「待ちがいるのに席が空いている」矛盾がなくなる。
  */
-export const WalkInRequest = z.object({ partySize: PartySize });
+export const WalkInRequest = z.object({
+  partySize: PartySize,
+  /** チケット URL の秘密パラメータ。**画面が作る**（`JoinRequest.secret` と同じ理由）。 */
+  secret: TicketSecret,
+});
 
 export type WalkInRequest = z.infer<typeof WalkInRequest>;
 
