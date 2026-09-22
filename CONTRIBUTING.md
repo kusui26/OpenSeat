@@ -89,6 +89,17 @@ docker compose -f infra/docker-compose.yml up --build   # コンテナで動か�
 pnpm --filter @openseat/server db:generate        # スキーマを変えたら生成し直す
 ```
 
+### 施設アクター
+
+施設ごとに 1 つの[アクター](apps/server/venue/actor.ts)が状態を持ち、**コマンドを 1 件ずつ順に**適用します（[開発プラン 9.4](docs/260916_plan_OpenSeat.md)）。
+
+- **時刻はサーバだけを信じます。** 時計は外から渡すので、テストでは偽装できます
+- **10 秒ごとに `tick` を呼びます。** 個別のタイマーは持ちません。止まっていて時間が飛んでも、来ている期限は次の 1 回で片づきます
+- **送り直しで二度適用しません**（[ADR-0015](docs/adr/0015-idempotency-key.md)）。画面が操作ごとに鍵を作って送ります
+- **記録してから配信します。** 順番を入れ替えません
+
+`/healthz` が `tickLagMs` を返します。**10 秒ごとに進めるので、0〜10 秒を行き来するのが正常**です。
+
 ### API の契約
 
 すべての入口は [`packages/shared`](packages/shared) に Zod で宣言してあります（[開発プラン 9.7](docs/260916_plan_OpenSeat.md)）。**型は `z.infer` で導き、同じ形を手で書きません。**

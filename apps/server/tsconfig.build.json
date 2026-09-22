@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+
+  // **本番に持っていかないものは、組み立てない。** あとから消すより、
+  // 最初から作らないほうが確かである（`infra/Dockerfile`）。
+  "exclude": ["**/*.test.ts", "db/fixtures.ts"]
+}

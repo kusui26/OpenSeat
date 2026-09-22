@@ -5,8 +5,9 @@ export default defineConfig({
     include: [
       'packages/*/src/**/*.test.ts',
       'packages/*/sim/**/*.test.ts',
-      'apps/*/src/**/*.test.ts',
-      'apps/*/db/**/*.test.ts',
+      // アプリの中は層が増えていく（`db` / `venue` / `routes`）。**置き場所を
+      // 数え上げない。** 数え上げると、層を足したときにテストが静かに走らなくなる。
+      'apps/*/**/*.test.ts',
     ],
     environment: 'node',
     /**
@@ -16,7 +17,7 @@ export default defineConfig({
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
-      include: ['packages/*/src/**/*.ts', 'packages/*/sim/**/*.ts', 'apps/*/db/**/*.ts'],
+      include: ['packages/*/src/**/*.ts', 'packages/*/sim/**/*.ts', 'apps/*/{db,venue,src}/**/*.ts'],
       exclude: ['**/*.test.ts', '**/index.ts'],
     },
   },

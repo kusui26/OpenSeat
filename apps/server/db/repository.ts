@@ -24,13 +24,15 @@ import {
   sameTable,
   sameTicket,
   type Actor,
+  type CommandType,
   type DomainEvent,
+  type RejectionCode,
   type Table,
   type Ticket,
   type Timestamp,
   type VenueState,
 } from '@openseat/core';
-import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import type { Db } from './client.js';
 import {
   decodeVenueState,
@@ -40,7 +42,7 @@ import {
   type TableKeys,
   type TicketKeys,
 } from './codec.js';
-import { events, tableStatusLog, tables, tickets, venues } from './schema.js';
+import { commandLog, events, tableStatusLog, tables, tickets, venues } from './schema.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type TicketRow = typeof tickets.$inferSelect;
@@ -58,6 +60,29 @@ export interface Commit {
   readonly actor: Actor | null;
   /** 適用した時刻。**サーバ時刻だけを信じる**（9.4）。 */
   readonly at: Timestamp;
+  /**
+   * 同じコマンドが二度届いたときのための控え（[ADR-0015](../../../docs/adr/0015-idempotency-key.md)）。
+   *
+   * **状態の変化と同じトランザクションで書く。** 別々に書くと、間で落ちたときに
+   * 「適用済みなのに控えが無い」状態が残り、送り直しで二度適用される。
+   */
+  readonly record: CommandRecord | null;
+}
+
+/**
+ * 受け取ったコマンドの控え。
+ *
+ * **結末だけを残す。** 画面に返す中身はそのときの状態から作り直す（ADR-0015）。
+ */
+export interface CommandRecord {
+  readonly key: string;
+  readonly at: Timestamp;
+  readonly commandType: CommandType;
+  readonly ok: boolean;
+  /** 断ったなら、その理由。通ったなら `null`。 */
+  readonly rejectionCode: RejectionCode | null;
+  /** その操作が相手にした（または作った）チケット。 */
+  readonly ticketId: string | null;
 }
 
 /** 席の姿の履歴の 1 区間。`core` の外の概念なので、ここで型を持つ。 */
@@ -150,6 +175,53 @@ function looksLikeEvent(value: unknown): value is DomainEvent {
   return DOMAIN_EVENT_TYPES.some((known) => known === value.type) && typeof value.at === 'number';
 }
 
+// ---- 受け取ったコマンドの控え ----
+
+/**
+ * その鍵で、すでに受け取っているか。
+ *
+ * **見つかったら適用しない。** 前回の結末をそのまま返す（ADR-0015）。
+ */
+export function findRecord(db: Db, venueId: string, key: string): CommandRecord | null {
+  const row = db
+    .select()
+    .from(commandLog)
+    .where(and(eq(commandLog.venueId, venueId), eq(commandLog.key, key)))
+    .get();
+  return row === undefined ? null : toRecord(row);
+}
+
+function toRecord(row: typeof commandLog.$inferSelect): CommandRecord {
+  return {
+    key: row.key,
+    at: row.at,
+    commandType: row.commandType,
+    ok: row.ok,
+    rejectionCode: row.rejectionCode,
+    ticketId: row.ticketId,
+  };
+}
+
+/**
+ * 断られたコマンドの控え。**状態は変わっていない**ので、単独で書く。
+ *
+ * 断りも控える理由は、**送り直しで結末が変わらないようにする**ためである。
+ * 1 回目が「満席です」だったものが 2 回目で通ると、画面の説明がつかない。
+ */
+export function recordRejection(db: Db, venueId: string, record: CommandRecord): void {
+  db.insert(commandLog).values({ venueId, ...record }).run();
+}
+
+/**
+ * 古い控えを捨てる（24 時間。ADR-0015）。
+ *
+ * **実証実験は 1 日単位である**（12.2）。それより古い送り直しは、別の操作と
+ * みなしてよい。捨てた件数を返す。
+ */
+export function pruneRecords(db: Db, before: Timestamp): number {
+  return db.delete(commandLog).where(lt(commandLog.at, before)).run().changes;
+}
+
 // ---- 施設と席を作る ----
 
 export interface CreateVenueParams {
@@ -201,7 +273,13 @@ export function commit(db: Db, change: Commit): void {
     writeVenue(tx, change);
     writeEvents(tx, change);
     writeSpans(tx, change);
+    writeRecord(tx, change);
   });
+}
+
+function writeRecord(tx: Tx, change: Commit): void {
+  if (change.record === null) return;
+  tx.insert(commandLog).values({ venueId: change.after.venueId, ...change.record }).run();
 }
 
 function writeVenue(tx: Tx, change: Commit): void {

@@ -23,15 +23,25 @@
  */
 
 import {
+  COMMAND_TYPES,
   END_REASONS,
   END_REASON_STATES,
+  REJECTION_CODES,
   TABLE_STATUSES,
   TAKEN_TABLE_STATUSES,
   TERMINAL_TICKET_STATES,
   TICKET_STATES,
 } from '@openseat/core';
 import { sql } from 'drizzle-orm';
-import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 // ---- 制約を組み立てる小道具 ----
 
@@ -410,6 +420,55 @@ export const events = sqliteTable(
   (event) => [
     index('events_venue_seq').on(event.venueId, event.seq),
     index('events_venue_at').on(event.venueId, event.at),
+  ],
+);
+
+// ---- 受け取ったコマンドの控え ----
+
+/**
+ * 同じコマンドが二度届いたときのための控え（9.4、[ADR-0015](../../../docs/adr/0015-idempotency-key.md)）。
+ *
+ * **モバイル回線では、届いた応答が返ってこないことがある。** 画面は送り直すが、
+ * 受け取る側から見れば同じ要求が 2 回来る。**2 枚目のチケットを作ってはいけない。**
+ *
+ * 鍵は画面が作る（コマンドごとに 1 つ）。**同じ鍵で二度目が来たら、適用せずに
+ * 前回の結末を返す。**
+ *
+ * **控えるのは結末だけで、応答そのものではない。** どのチケットの話で、通ったか
+ * 断られたか、だけを残す。画面に返す中身は**そのときの状態**から作り直す ——
+ * 30 秒前の姿を返すより、いまの姿を返すほうが役に立つ（ADR-0015）。
+ */
+export const commandLog = sqliteTable(
+  'command_log',
+  {
+    venueId: text('venue_id')
+      .notNull()
+      .references(() => venues.id, { onDelete: 'cascade' }),
+    /** 画面が作った鍵。**推測されても困らない**が、衝突すると別の操作が飲み込まれる。 */
+    key: text('key').notNull(),
+    /** 受け取った時刻。**古い控えを捨てる**ための目印（24 時間）。 */
+    at: integer('at').notNull(),
+    commandType: text('command_type', { enum: COMMAND_TYPES }).notNull(),
+    /** 通ったか。断られたなら理由が入る。 */
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+    rejectionCode: text('rejection_code', { enum: REJECTION_CODES }),
+    /** その操作が相手にした（または作った）チケット。 */
+    ticketId: text('ticket_id'),
+  },
+  (entry) => [
+    primaryKey({ columns: [entry.venueId, entry.key] }),
+    // 古い控えを捨てるときに引く。
+    index('command_log_at').on(entry.at),
+    // 通ったなら理由は無く、断られたなら理由がある。**どちらでもない行を作らない。**
+    check('command_type_is_declared', sql.raw(oneOf('command_type', COMMAND_TYPES))),
+    check(
+      'rejection_code_is_declared',
+      sql.raw(`rejection_code IS NULL OR ${oneOf('rejection_code', REJECTION_CODES)}`),
+    ),
+    check(
+      'rejection_matches_outcome',
+      sql.raw('(ok AND rejection_code IS NULL) OR (NOT ok AND rejection_code IS NOT NULL)'),
+    ),
   ],
 );
 

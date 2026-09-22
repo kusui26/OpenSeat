@@ -18,7 +18,7 @@
 import { getTableColumns, is } from 'drizzle-orm';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import * as schema from './schema.js';
-import { events, tableStatusLog, tables, tickets, venues, zones } from './schema.js';
+import { commandLog, events, tableStatusLog, tables, tickets, venues, zones } from './schema.js';
 
 /** まだ無い。いつ入るかを書く。 */
 export interface Later {
@@ -233,12 +233,18 @@ export const MAPPING: Readonly<Record<string, TableMapping>> = {
  * `table_status_log` を足した理由は Phase 1 の PR 14 で分かったことにある
  * （[ADR-0013](../../../docs/adr/0013-what-we-record.md)）。
  */
-export const ADDED_TABLES: ReadonlyMap<SQLiteTable, string> = new Map([
+const ADDED: readonly (readonly [SQLiteTable, string])[] = [
   [
     tableStatusLog,
     '席の姿の履歴。イベントからは「席がいまどの姿か」が分からないので、稼働率（8.3）を出すために別に持つ',
   ],
-]);
+  [
+    commandLog,
+    '受け取ったコマンドの控え。モバイル回線の送り直しで二度適用しないために要る（9.4、ADR-0015）',
+  ],
+];
+
+export const ADDED_TABLES: ReadonlyMap<SQLiteTable, string> = new Map(ADDED);
 
 /**
  * スキーマにある表を全部。

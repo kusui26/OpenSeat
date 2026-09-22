@@ -2,19 +2,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "./dist",
-    "noEmit": false,
-    "composite": true,
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
 
     // ここは境界である。`process`・`node:*`・HTTP・SQLite に触ってよい層で、
     // だから Node の型を入れる（`packages/core` は依存ゼロのまま）。
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "db/**/*.ts"],
 
-  // **使うものだけを参照する。** コンテナは `packages/core` と `apps/server` しか
-  // 写さないので（`infra/Dockerfile`）、使っていないものを参照すると組み立てが
-  // 落ちる。`packages/shared` を足すのは、サーバが契約を使い始める PR 4 で、
-  // そのとき `Dockerfile` の `COPY` も一緒に足す。
+  // **テストも型検査に含める。** 外れていると、型の合わないテストが
+  // 「走るけれど検査されない」状態になる（`pnpm typecheck` が見る）。
+  "include": ["src/**/*.ts", "db/**/*.ts", "venue/**/*.ts"],
+
+  // **使うものだけを参照する。** コンテナが写すものと揃えること（`infra/Dockerfile`）。
+  // 使っていないものを参照すると、組み立てがファイルを見つけられずに落ちる。
   "references": [{ "path": "../../packages/core/tsconfig.build.json" }]
 }
