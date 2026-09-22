@@ -27,6 +27,8 @@
  * | `GUARD_NOT_IMPLEMENTED` | 遷移はあるが、条件の判定がまだ書かれていない |
  * | `REASON_REQUIRED` | スタッフの取り消しに理由が無い（7.9） |
  * | `STAFF_ONLY` | 着席の記録が残っている席を、スタッフ以外が空席に戻そうとした（7.11） |
+ * | `FORBIDDEN` | その役割にその操作が許されていない、または他人のチケットを相手にした（9.8） |
+ * | `ACTOR_MISMATCH` | コマンドが名乗る側と、実行者の役割が食い違う（起きてはならない） |
  * | `NO_CODE_AVAILABLE` | 生きているチケットが表示コードを使い切った |
  * | `CLOCK_WENT_BACKWARD` | 渡された時刻が状態の時刻より前（起きてはならない。9.4） |
  * | `INVARIANT_VIOLATED` | 出口の検査で不変条件が破れた（起きてはならない） |
@@ -45,6 +47,8 @@ export const REJECTION_CODES = [
   'GUARD_NOT_IMPLEMENTED',
   'REASON_REQUIRED',
   'STAFF_ONLY',
+  'FORBIDDEN',
+  'ACTOR_MISMATCH',
   'NO_CODE_AVAILABLE',
   'CLOCK_WENT_BACKWARD',
   'INVARIANT_VIOLATED',
@@ -66,13 +70,18 @@ export function rejection(code: RejectionCode, describe: string): Rejection {
 /**
  * 拒否のうち、**起きてはならない**もの。
  *
- * どちらも入力の誤りではなく実装の誤りである。`INVARIANT_VIOLATED` は出口の
- * 検査が破れたこと、`CLOCK_WENT_BACKWARD` は渡された時刻が戻ったこと（9.4）。
- * 境界側はこれを利用者向けの文言に変えるのではなく、記録して調査する対象と
- * して扱うこと。
+ * どれも入力の誤りではなく実装の誤りである。`INVARIANT_VIOLATED` は出口の
+ * 検査が破れたこと、`CLOCK_WENT_BACKWARD` は渡された時刻が戻ったこと（9.4）、
+ * `ACTOR_MISMATCH` はコマンドの名乗りと実行者が食い違うこと（境界が組み立てを
+ * 間違えている）。境界側はこれを利用者向けの文言に変えるのではなく、記録して
+ * 調査する対象として扱うこと。
  */
 export function isDefect(value: Rejection): boolean {
   return DEFECT_CODES.includes(value.code);
 }
 
-const DEFECT_CODES: readonly RejectionCode[] = ['INVARIANT_VIOLATED', 'CLOCK_WENT_BACKWARD'];
+const DEFECT_CODES: readonly RejectionCode[] = [
+  'INVARIANT_VIOLATED',
+  'CLOCK_WENT_BACKWARD',
+  'ACTOR_MISMATCH',
+];

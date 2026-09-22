@@ -50,7 +50,7 @@ import { closeVenue, openVenue, releaseAll } from './venue.js';
 import {
   CANCEL_END_REASONS,
   CHECKOUT_END_REASONS,
-  type Actor,
+  type Side,
   type CancelCommand,
   type CancelReason,
   type CheckInCommand,
@@ -187,7 +187,7 @@ function handleCancel(state: VenueState, command: CancelCommand, now: Timestamp)
 function ticketEnded(
   ticketId: TicketId,
   endReason: EndReason,
-  by: Actor,
+  by: Side,
   cancelReason: CancelReason | null,
   now: Timestamp,
 ): DomainEvent {
@@ -720,7 +720,7 @@ function handleConfirmFree(state: VenueState, command: ConfirmFreeCommand, now: 
  * **`by` がスタッフであることの確認は境界側の責務である**（Phase 2 の権限表）。
  * `core` はコマンドに書かれた実行者を信じる。取り消しや退席の申告と同じ扱い。
  */
-function checkWhoMayFree(table: Table, by: Actor): Rejection | null {
+function checkWhoMayFree(table: Table, by: Side): Rejection | null {
   if (table.occupantTicketId === null || by === 'staff') return null;
   return rejection('STAFF_ONLY', '着席の記録が残っている席を空席に戻せるのはスタッフだけ');
 }

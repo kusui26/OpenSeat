@@ -6,11 +6,16 @@
  */
 
 import {
-  apply,
+  ANONYMOUS,
   createTable,
   createVenueState,
   DEFAULT_POLICY,
+  dispatch,
+  member,
+  targetTicketId,
+  ticketOwner,
   tick,
+  type Actor,
   type Command,
   type Decision,
   type DomainEvent,
@@ -25,7 +30,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { open, type Connection, type Db } from './client.js';
-import { commit, createVenue, insertTable, type CommitActor } from './repository.js';
+import { commit, createVenue, insertTable } from './repository.js';
 
 export const VENUE_ID = 'v-test';
 
@@ -103,6 +108,24 @@ export function seed(db: Db, params: SeedParams): VenueState {
   return state;
 }
 
+// ---- 誰が出しているか ----
+
+/** テストの中の管理者。席の設定まで含めて出せる役割（9.8）。 */
+const ADMIN: Actor = member('admin', 'fixture-admin');
+
+/**
+ * そのコマンドを出しそうな人。
+ *
+ * **ここは永続化のテストの足場である。** 誰が何を出せるかを確かめるのは
+ * `core` の権限のテストで、こちらは「記録が歪まないこと」だけを見たい。
+ * だから実行者は書かずに済むようにしてある。
+ */
+function actorFor(command: Command): Actor {
+  const target: string | null = targetTicketId(command);
+  if (target !== null) return ticketOwner(target);
+  return 'by' in command && command.by === 'staff' ? ADMIN : ANONYMOUS;
+}
+
 // ---- 記録しながら進める ----
 
 /**
@@ -114,11 +137,15 @@ export function seed(db: Db, params: SeedParams): VenueState {
 export interface Recorder {
   /** いま手元にある状態。 */
   readonly state: () => VenueState;
-  /** コマンドを適用して記録する。拒否されたらそのまま返し、記録もしない。 */
+  /**
+   * コマンドを適用して記録する。拒否されたらそのまま返し、記録もしない。
+   *
+   * 実行者を省くと、**そのコマンドを出しそうな人**が選ばれる（`actorFor`）。
+   */
   readonly send: (
     command: Command,
     at: Timestamp,
-    actor?: CommitActor | null,
+    actor?: Actor,
   ) => Result<Decision<VenueState, DomainEvent>, Rejection>;
   /** 時刻を進めて記録する。 */
   readonly advance: (to: Timestamp) => void;
@@ -129,7 +156,7 @@ function record(
   db: Db,
   before: VenueState,
   decided: Decision<VenueState, DomainEvent>,
-  actor: CommitActor | null,
+  actor: Actor | null,
   at: Timestamp,
 ): VenueState {
   commit(db, { before, after: decided.state, events: decided.events, actor, at });
@@ -140,8 +167,8 @@ export function recorder(db: Db, initial: VenueState): Recorder {
   let current: VenueState = initial;
   return {
     state: () => current,
-    send: (command, at, actor = null) => {
-      const result = apply(current, command, at);
+    send: (command, at, actor = actorFor(command)) => {
+      const result = dispatch(current, actor, command, at);
       if (result.ok) current = record(db, current, result.value, actor, at);
       return result;
     },

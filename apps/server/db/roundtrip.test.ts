@@ -10,9 +10,11 @@
  */
 
 import {
+  ANONYMOUS,
   DEFAULT_POLICY,
   findTable,
   findTicket,
+  member,
   minutes,
   type Table,
   type Timestamp,
@@ -279,11 +281,11 @@ describe('状態と一緒に記録したもの', () => {
    * 時計が起こした変化には実行者がいないので、そこは空のままにする。
    */
   it('誰が押したかを残し、時計が起こしたものは空にする', () => {
-    run.send({ type: 'OPEN', closesAt: at(480), by: 'staff' }, OPENED, { kind: 'staff', id: 'u-1' });
+    run.send({ type: 'OPEN', closesAt: at(480), by: 'staff' }, OPENED, member('staff', 'u-1'));
     run.send(
       { type: 'JOIN', ticketId: 'k-1', partySize: 2, requiredTags: [], hasNotificationChannel: false },
       at(1),
-      { kind: 'user', id: null },
+      ANONYMOUS,
     );
     run.advance(at(30));
 
@@ -297,7 +299,7 @@ describe('状態と一緒に記録したもの', () => {
       kind: 'staff',
       id: 'u-1',
     });
-    expect(rows.find((row) => row.type === 'TicketJoined')?.kind).toBe('user');
+    expect(rows.find((row) => row.type === 'TicketJoined')?.kind).toBe('anonymous');
     // 時計が終わらせたチケットに、押した人はいない。
     expect(rows.find((row) => row.type === 'TicketEnded')?.kind).toBeNull();
   });

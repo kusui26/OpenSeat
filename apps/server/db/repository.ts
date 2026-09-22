@@ -45,19 +45,17 @@ import { events, tableStatusLog, tables, tickets, venues } from './schema.js';
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type TicketRow = typeof tickets.$inferSelect;
 
-/** コマンドを出した人。`tick` から出た変化には実行者がいないので `null`。 */
-export interface CommitActor {
-  readonly kind: Actor;
-  /** スタッフ・管理者の識別子。利用者は匿名なので `null`（CLAUDE.md 7）。 */
-  readonly id: string | null;
-}
-
 /** 1 回の適用で起きたことの全部。 */
 export interface Commit {
   readonly before: VenueState;
   readonly after: VenueState;
   readonly events: readonly DomainEvent[];
-  readonly actor: CommitActor | null;
+  /**
+   * コマンドを出した人（9.8）。`tick` から出た変化には実行者がいないので `null`。
+   *
+   * **役割と識別子だけを残す。** 氏名も連絡先も持たない（CLAUDE.md 7 章）。
+   */
+  readonly actor: Actor | null;
   /** 適用した時刻。**サーバ時刻だけを信じる**（9.4）。 */
   readonly at: Timestamp;
 }
@@ -354,8 +352,8 @@ function eventRow(change: Commit, event: DomainEvent): typeof events.$inferInser
     type: event.type,
     ticketId: 'ticketId' in event ? event.ticketId : null,
     tableId: 'tableId' in event ? event.tableId : null,
-    actorKind: change.actor?.kind ?? null,
-    actorId: change.actor?.id ?? null,
+    actorKind: change.actor?.role ?? null,
+    actorId: change.actor?.userId ?? null,
     payload: JSON.stringify(event),
   };
 }

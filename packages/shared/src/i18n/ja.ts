@@ -103,6 +103,7 @@ export const ja: Bundle = {
     RATE_LIMITED: '短い時間に何度もご登録いただいています。しばらくしてからお試しください。',
 
     // こちらの落ち度（外には出ない）
+    ACTOR_MISMATCH: '申し訳ありません。うまく処理できませんでした。',
     GUARD_NOT_IMPLEMENTED: '申し訳ありません。うまく処理できませんでした。',
     CLOCK_WENT_BACKWARD: '申し訳ありません。うまく処理できませんでした。',
     INVARIANT_VIOLATED: '申し訳ありません。うまく処理できませんでした。',

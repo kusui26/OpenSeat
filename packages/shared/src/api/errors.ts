@@ -18,7 +18,6 @@ import { z } from 'zod';
  * |---|---|
  * | `INVALID_REQUEST` | Zod の検証を通らなかった |
  * | `UNAUTHORIZED` | セッションが無い（PR 12） |
- * | `FORBIDDEN` | 役割が足りない（権限表。PR 3） |
  * | `NOT_FOUND` | その URL の施設・チケット・席が無い |
  * | `RATE_LIMITED` | 受付の回数制限（7.16 の `join_rate_limit_per_hour`） |
  * | `INTERNAL` | 上記のどれでもない。**理由を外に出さない** |
@@ -26,7 +25,6 @@ import { z } from 'zod';
 export const BOUNDARY_ERROR_CODES = [
   'INVALID_REQUEST',
   'UNAUTHORIZED',
-  'FORBIDDEN',
   'NOT_FOUND',
   'RATE_LIMITED',
   'INTERNAL',
@@ -39,6 +37,9 @@ export type BoundaryErrorCode = (typeof BOUNDARY_ERROR_CODES)[number];
  *
  * **`core` の拒否をそのまま含む。** 境界で言い換えると、同じことを 2 か所で
  * 名づけることになる。
+ *
+ * **`FORBIDDEN` は `core` の側にある。** 権限表（CLAUDE.md 3.2(4)）はドメインの
+ * 宣言で、境界はそれを評価しないためである（PR 3）。
  */
 export const API_ERROR_CODES = [...REJECTION_CODES, ...BOUNDARY_ERROR_CODES] as const;
 
@@ -91,6 +92,7 @@ export const ERROR_STATUS = {
   FORBIDDEN: 403,
   STAFF_ONLY: 403,
 
+
   // いまはできない
   TICKET_ALREADY_EXISTS: 409,
   QUEUE_FULL: 409,
@@ -102,6 +104,7 @@ export const ERROR_STATUS = {
   RATE_LIMITED: 429,
 
   // こちらの落ち度
+  ACTOR_MISMATCH: 500,
   GUARD_NOT_IMPLEMENTED: 500,
   CLOCK_WENT_BACKWARD: 500,
   INVARIANT_VIOLATED: 500,

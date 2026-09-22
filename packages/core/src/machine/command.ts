@@ -21,20 +21,16 @@
  * （`allocate.ts`）。
  */
 
+import type { Side } from '../domain/actor.js';
 import type { TableId, Tag, TicketId } from '../domain/ids.js';
 import type { EndReason } from '../domain/ticket.js';
 import type { Timestamp } from '../time.js';
 
 /**
- * コマンドを出した人。
- *
- * `core` が区別するのは「本人か、スタッフか」だけで、それ以上の役割
- * （owner / admin / staff）と権限表は Phase 2 の責務である（Phase 1 プラン 2）。
- * 権限はサーバ側の実行者の概念に依存するため、ここでは先取りしない。
+ * その操作を、どちら側が行ったか。**宣言は [`domain/actor.ts`](../domain/actor.ts)** に
+ * ある。役割（誰か）との違いも、そちらに書いてある。
  */
-export const ACTORS = ['user', 'staff'] as const;
-
-export type Actor = (typeof ACTORS)[number];
+export type { Side } from '../domain/actor.js';
 
 /**
  * キャンセルの理由（全体プラン 7.9）。統計に使う。
@@ -46,15 +42,15 @@ export const CANCEL_REASONS = ['found_seat', 'leaving', 'too_long', 'other'] as 
 export type CancelReason = (typeof CANCEL_REASONS)[number];
 
 /**
- * 誰が取り消したかと、記録される終わり方の対応。
+ * どちら側が取り消したかと、記録される終わり方の対応。
  *
- * 分岐ではなく表として宣言する。実行者を足したときに、どの終わり方で記録するかを
+ * 分岐ではなく表として宣言する。側を足したときに、どの終わり方で記録するかを
  * 必ず決めさせるため（CLAUDE.md 3.2）。
  */
 export const CANCEL_END_REASONS = {
   user: 'user_cancel',
   staff: 'staff_cancel',
-} as const satisfies Record<Actor, EndReason>;
+} as const satisfies Record<Side, EndReason>;
 
 /**
  * 誰が退席を申告したかと、記録される終わり方の対応。
@@ -65,7 +61,7 @@ export const CANCEL_END_REASONS = {
 export const CHECKOUT_END_REASONS = {
   user: 'checked_out',
   staff: 'staff_checkout',
-} as const satisfies Record<Actor, EndReason>;
+} as const satisfies Record<Side, EndReason>;
 
 /** 受付（全体プラン 7.5）。入口の受付 QR から人数を登録する。 */
 export interface JoinCommand {
@@ -82,7 +78,7 @@ export interface JoinCommand {
 export interface CancelCommand {
   readonly type: 'CANCEL';
   readonly ticketId: TicketId;
-  readonly by: Actor;
+  readonly by: Side;
   /** 本人は任意、スタッフは必須。 */
   readonly reason: CancelReason | null;
 }
@@ -147,7 +143,7 @@ export interface CheckInCommand {
 export interface CheckOutCommand {
   readonly type: 'CHECK_OUT';
   readonly ticketId: TicketId;
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -232,7 +228,7 @@ export interface ReportInUseCommand {
 export interface ConfirmFreeCommand {
   readonly type: 'CONFIRM_FREE';
   readonly tableId: TableId;
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -281,7 +277,7 @@ export interface HeartbeatCommand {
 export interface OpenCommand {
   readonly type: 'OPEN';
   readonly closesAt: Timestamp | null;
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -296,7 +292,7 @@ export interface OpenCommand {
  */
 export interface CloseCommand {
   readonly type: 'CLOSE';
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -311,7 +307,7 @@ export interface CloseCommand {
  */
 export interface ReleaseAllCommand {
   readonly type: 'RELEASE_ALL';
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -323,7 +319,7 @@ export interface ReleaseAllCommand {
 export interface DisableTableCommand {
   readonly type: 'DISABLE_TABLE';
   readonly tableId: TableId;
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 /**
@@ -335,7 +331,7 @@ export interface DisableTableCommand {
 export interface EnableTableCommand {
   readonly type: 'ENABLE_TABLE';
   readonly tableId: TableId;
-  readonly by: Actor;
+  readonly by: Side;
 }
 
 export type Command =

@@ -26,7 +26,7 @@ import {
   venueClosesAt,
 } from './deadlines.js';
 import { evaluateTicketGuard } from './guards.js';
-import type { Actor, Command } from './command.js';
+import type { Side, Command } from './command.js';
 import type { DomainEvent } from './events.js';
 import { POST_ALLOCATION_INVARIANTS, STATE_INVARIANTS } from './invariants.js';
 import { TICKET_TRANSITIONS } from './ticket-machine.js';
@@ -113,7 +113,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: ticketIdArb, tableId: fc.constantFrom('tb0', 'tb1', 'tb2') })
     .map((fields): Command => ({ type: 'CHECK_IN', ...fields })),
   fc
-    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CHECK_OUT', ...fields })),
   fc
     .record({ ticketId: ticketIdArb, tableId: tableIdArb })
@@ -128,7 +128,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     .record({ ticketId: fc.option(ticketIdArb, { nil: null }), tableId: tableIdArb })
     .map((fields): Command => ({ type: 'REPORT_IN_USE', ...fields })),
   fc
-    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CONFIRM_FREE', ...fields })),
   fc
     .record({
@@ -138,7 +138,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     })
     .map((fields): Command => ({ type: 'WALK_IN', ...fields })),
   fc
-    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
   // 施設の開閉（7.14、7.9）。運用終了は筋書きの途中に来るよう近くに置く。
   fc
@@ -146,16 +146,16 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
       closesAt: fc.option(fc.integer({ min: 0, max: 60 }).map((min) => NOW + minutes(min)), {
         nil: null,
       }),
-      by: fc.constantFrom<Actor>('user', 'staff'),
+      by: fc.constantFrom<Side>('user', 'staff'),
     })
     .map((fields): Command => ({ type: 'OPEN', ...fields })),
-  fc.constantFrom<Actor>('user', 'staff').map((by): Command => ({ type: 'CLOSE', by })),
-  fc.constantFrom<Actor>('user', 'staff').map((by): Command => ({ type: 'RELEASE_ALL', by })),
+  fc.constantFrom<Side>('user', 'staff').map((by): Command => ({ type: 'CLOSE', by })),
+  fc.constantFrom<Side>('user', 'staff').map((by): Command => ({ type: 'RELEASE_ALL', by })),
   fc
-    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'DISABLE_TABLE', ...fields })),
   fc
-    .record({ tableId: tableIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ tableId: tableIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'ENABLE_TABLE', ...fields })),
 );
 
@@ -179,7 +179,7 @@ const queueCommandArb: fc.Arbitrary<Command> = fc.oneof(
   ticketIdArb.map((ticketId): Command => ({ type: 'HEARTBEAT', ticketId })),
   ticketIdArb.map((ticketId): Command => ({ type: 'STILL_HERE', ticketId })),
   fc
-    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Actor>('user', 'staff') })
+    .record({ ticketId: ticketIdArb, by: fc.constantFrom<Side>('user', 'staff') })
     .map((fields): Command => ({ type: 'CANCEL', reason: 'other', ...fields })),
 );
 
