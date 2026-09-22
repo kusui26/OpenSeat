@@ -5,6 +5,9 @@
       "path": "./packages/core/tsconfig.build.json"
     },
     {
+      "path": "./packages/shared/tsconfig.build.json"
+    },
+    {
       "path": "./apps/server/tsconfig.json"
     }
   ]

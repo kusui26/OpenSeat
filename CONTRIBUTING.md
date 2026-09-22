@@ -50,10 +50,11 @@ pnpm verify      # lint、typecheck、テスト、アーキテクチャ検査、
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | TypeScript の型検査 |
 | `pnpm test` | Vitest（`pnpm test:watch` で監視） |
-| `pnpm check:arch` | 層の境界の検査。`packages/core` の依存ゼロと純粋性、ルート層から永続化層への直接依存 |
+| `pnpm check:arch` | 層の境界の検査。`packages/core` の依存ゼロと純粋性、`packages/shared` が画面でも動くこと、ルート層から永続化層への直接依存 |
 | `pnpm check:links` | ドキュメント内の相対リンクの検査 |
 | `pnpm sim` | シミュレーションを走らせ、指標を出す（開発プラン 8 章） |
 | `pnpm server` | サーバを手元で動かす（開発プラン 9.2） |
+| `pnpm openapi` | API の文書（`docs/openapi.json`）を書き出す |
 
 `pnpm check:arch` と `pnpm check:links` は依存を持たない素の Node スクリプトなので、`pnpm install` の前でも動きます。
 
@@ -88,6 +89,19 @@ docker compose -f infra/docker-compose.yml up --build   # コンテナで動か�
 pnpm --filter @openseat/server db:generate        # スキーマを変えたら生成し直す
 ```
 
+### API の契約
+
+すべての入口は [`packages/shared`](packages/shared) に Zod で宣言してあります（[開発プラン 9.7](docs/260916_plan_OpenSeat.md)）。**型は `z.infer` で導き、同じ形を手で書きません。**
+
+- 入口の一覧は [`src/api/catalog.ts`](packages/shared/src/api/catalog.ts)。**9.7 のどの行から開いたか**と、9.7 に無いものを足した理由が書いてあります
+- OpenAPI（[`docs/openapi.json`](docs/openapi.json)）は一覧から生成します。**手で書き足さないでください**
+
+```
+pnpm openapi                                      # 契約を変えたら書き出し直す
+```
+
+**`packages/shared` は画面（`apps/web`）も読みます。** Node の組み込みに触らないでください（`pnpm check:arch` が落とします）。
+
 Phase 2 はこの手前に「Hono + SQLite + Docker + Railway が通ること」を 1 日で確かめる工程を置きました（9.13）。結果は [スパイクの報告](docs/260921_report_spike.md) にあります。**その使い捨てのコードは役目を終えて消し、`infra/` の組み立て方だけが残っています。**
 
 ## 実装の規約
@@ -112,9 +126,9 @@ lint、typecheck、テストを通してから PR を出してください。特
 
 ## 翻訳と文言
 
-利用者に見える文字列は `packages/shared` の i18n に置きます。日本語と英語が既定で、中国語と韓国語は歓迎します。
+利用者に見える文字列は [`packages/shared/src/i18n`](packages/shared/src/i18n) に置きます。日本語と英語が既定で、中国語と韓国語は歓迎します。**いまあるのは日本語だけ**なので、翻訳は [`ja.ts`](packages/shared/src/i18n/ja.ts) と同じ鍵を持つファイルを 1 つ足すだけです（鍵が欠けると型エラーになります）。
 
-文言には方針があります。「予約」という語を使いません。約束できないからです。命令形を避け、理由を添えます。詳しくは開発プランの 6.5 を参照してください。
+文言には方針があります。**「予約」という語を使いません。** 約束できないからです。命令形を避け、理由を添えます。時間の上限は「目安」と書きます。詳しくは開発プランの 6.5 を参照してください。**「予約」が混ざっていないことはテストが見ています。**
 
 ## セキュリティ
 

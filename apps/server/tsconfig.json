@@ -11,5 +11,10 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "db/**/*.ts"],
+
+  // **使うものだけを参照する。** コンテナは `packages/core` と `apps/server` しか
+  // 写さないので（`infra/Dockerfile`）、使っていないものを参照すると組み立てが
+  // 落ちる。`packages/shared` を足すのは、サーバが契約を使い始める PR 4 で、
+  // そのとき `Dockerfile` の `COPY` も一緒に足す。
   "references": [{ "path": "../../packages/core/tsconfig.build.json" }]
 }
