@@ -1,0 +1,47 @@
+# 記録を絶やさないための複製（開発プラン 9.11、[ADR-0019](../docs/adr/0019-where-to-run-it.md)）
+#
+# **SQLite を、書かれるそばから外へ写す。** 置き場のディスクが飛んでも、
+# コンテナごと消えても、ここから戻せる。
+#
+# ## 何が起きるか
+#
+# | いつ | 何が起きる |
+# |---|---|
+# | 起動時、記録が無い | **複製から戻す**（新しいホストで起こしたときに効く） |
+# | 動いているあいだ | 変更を 1 秒ごとに写す |
+# | 落ちたとき | 写し終えた分まで戻せる |
+#
+# ## 設定していなければ、複製しない
+#
+# `LITESTREAM_REPLICA_URL` が空なら、`entrypoint.sh` はこのファイルを使わずに
+# アプリだけを起こす。**S3 を持たない施設でも `docker compose up -d` が通ること**
+# を守るためである（11.4 の完了条件）。
+#
+# ## 宛先の書き方
+#
+# | 宛先 | `LITESTREAM_REPLICA_URL` |
+# |---|---|
+# | Cloudflare R2 | `s3://BUCKET/openseat?endpoint=ACCOUNT_ID.r2.cloudflarestorage.com&region=auto` |
+# | 同じホストの別ディスク | `file:///mnt/backup/openseat` |
+#
+# **鍵はバケット 1 つに絞ること。** 漏れたときに届く範囲を、この用途だけに閉じる
+# （[ADR-0019](../docs/adr/0019-where-to-run-it.md)）。
+#
+# **最後の 1 つを忘れないこと。** S3 を持たない施設には、これがいちばん導入の
+# ハードルが低い。外部への送信も発生しない。
+#
+# 鍵は `LITESTREAM_ACCESS_KEY_ID` と `LITESTREAM_SECRET_ACCESS_KEY` で渡す
+# （`file://` では要らない）。**`.env` で扱い、コミットしない**（CLAUDE.md 7 章）。
+
+dbs:
+  - path: ${DB_PATH}
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}
+
+      # **どれだけ巻き戻せるか。** 実証実験は土日 4 日間なので（12.2）、
+      # 1 週間分あれば「先週の状態に戻す」まで届く。
+      retention: 168h
+
+      # 書かれてから写るまで。**短いほど失われる量が減る**が、そのぶん
+      # 宛先への書き込みが増える。1 秒は Litestream の既定である。
+      sync-interval: 1s

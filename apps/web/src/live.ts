@@ -44,6 +44,13 @@ export interface LiveParams {
   readonly onLive: (live: boolean) => void;
   /** 接続の作り方。**テストでは偽物を渡す。** */
   readonly open?: OpenSocket;
+  /**
+   * 0 以上 1 未満の乱数。**テストでは固定する。**
+   *
+   * 秘密を作るわけではないので `Math.random` でよい（推測不能さが要るのは
+   * `device.ts` のトークンのほうである）。
+   */
+  readonly random?: () => number;
 }
 
 /** 何も来なくなってから、切れたとみなすまで。**`ping` の 2 回ぶん待つ。** */
@@ -123,15 +130,27 @@ class Live {
     }, SILENCE_MS);
   }
 
-  /** 切れた。**時間を倍にしながらつなぎ直す。** */
+  /**
+   * 切れた。**時間を倍にしながら、散らしてつなぎ直す。**
+   *
+   * 散らす理由は `STREAM_RETRY_MS` にある。**同時に切れた端末を、同時に
+   * 戻らせない。**
+   */
   private drop(): void {
     if (this.stopped) return;
     this.shut();
     this.params.onLive(false);
+    const after: number = this.spread(this.wait);
     this.again = setTimeout(() => {
       this.start();
-    }, this.wait);
+    }, after);
     this.wait = Math.min(this.wait * 2, STREAM_RETRY_MS.max);
+  }
+
+  /** 0 からその時間までのどこか（full jitter）。 */
+  private spread(wait: number): number {
+    const random: () => number = this.params.random ?? Math.random;
+    return Math.floor(random() * wait);
   }
 
   stop(): void {

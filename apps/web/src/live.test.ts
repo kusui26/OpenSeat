@@ -39,6 +39,8 @@ let opened: FakeSocket[];
 let heard: string[];
 let live: boolean[];
 let stop: () => void;
+/** 散らし方を決める乱数。**既定は窓のほぼ端**にして、待ち時間を読みやすくする。 */
+let dice: number;
 
 function start(url = '/api/t/tk_1/stream?k=s'): void {
   stop = connect({
@@ -49,6 +51,7 @@ function start(url = '/api/t/tk_1/stream?k=s'): void {
       opened.push(socket);
       return socket;
     },
+    random: () => dice,
     onMessage: (data) => heard.push(data),
     onLive: (now) => live.push(now),
   });
@@ -65,6 +68,7 @@ beforeEach(() => {
   opened = [];
   heard = [];
   live = [];
+  dice = 0.999;
 });
 
 afterEach(() => {
@@ -158,6 +162,34 @@ describe('切れたとき', () => {
     last().fire('error');
     vi.advanceTimersByTime(STREAM_RETRY_MS.first);
     expect(opened).toHaveLength(3);
+  });
+
+  it('待つ時間を散らす（同時に切れた端末を、同時に戻らせない）', () => {
+    // **置き場が一定時間で接続を切ることがある**（ADR-0019）。散らさないと、
+    // 開店直後につないだ数百台が、以後ずっと揃って戻り続ける。
+    dice = 0;
+    start();
+    last().fire('error');
+    vi.advanceTimersByTime(1);
+    expect(opened, '窓の先頭を引いたら、すぐ戻る').toHaveLength(2);
+
+    dice = 0.5;
+    last().fire('error');
+    // 2 回目の窓は 2 秒。その半分では、まだ戻らない。
+    vi.advanceTimersByTime(STREAM_RETRY_MS.first * 2 * 0.5 - 1);
+    expect(opened, '窓の半ばを引いたら、半ばまで待つ').toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(opened).toHaveLength(3);
+  });
+
+  it('散らしても、その時点の窓を超えない', () => {
+    start();
+    for (const at of [1, 2, 4, 8]) {
+      last().fire('error');
+      vi.advanceTimersByTime(STREAM_RETRY_MS.first * at);
+    }
+    // 4 回とも窓の内側で戻っている（超えていれば、ここで数が足りない）。
+    expect(opened).toHaveLength(5);
   });
 
   it('前の接続を閉じてからつなぎ直す', () => {

@@ -187,6 +187,32 @@ jobs:
           path: e2e/test-results/
           retention-days: 7
 
+  # **バックアップは「取れていること」ではなく「戻せること」で測る**（9.11）。
+  #
+  # 取れているつもりで戻せなかった、というのがいちばんよくある壊れ方なので、
+  # 実際に消して、実際に戻すところまでを毎回まわす。
+  restore:
+    name: 記録を消して、複製から戻せる
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # **`Dockerfile` と同じ版を使う。** 0.5 系は 0.3 系の複製から戻せないので、
+      # ここと本番で版がずれると、確かめたことにならない。
+      - name: Litestream を用意する
+        run: |
+          VERSION="$(grep -oE 'LITESTREAM_VERSION=[0-9.]+' infra/Dockerfile | cut -d= -f2)"
+          echo "Litestream ${VERSION} を使います"
+          # **配布物の名前は `x86_64`。** `amd64` では 404 になる。
+          curl -fsSL "https://github.com/benbjohnson/litestream/releases/download/v${VERSION}/litestream-${VERSION}-linux-x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin litestream
+          litestream version
+
+      - name: 復元のリハーサル
+        run: ./infra/restore-drill.sh
+
   image:
     name: コンテナが組み上がり、通しで動く
     runs-on: ubuntu-latest
