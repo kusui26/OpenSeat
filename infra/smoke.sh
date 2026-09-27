@@ -31,9 +31,12 @@ fail() {
 
 # 席の数を変えて起こせるようにしてある。**2 回目は席の数を変えて起こす**ので、
 # 記録が残っていれば「作り直していない」ことが席の数に出る。
+#
+# 2 つめの引数に複製先を渡すと、Litestream の下で起こす（9.11）。
 start() {
   docker run -d --name "$NAME" -p "${PORT}:8080" -v "${VOLUME}:/data" \
-    -e VENUE_ID=smoke -e SEED_TABLES="$1" -e SEED_OPEN=true "$IMAGE" >/dev/null
+    -e VENUE_ID=smoke -e SEED_TABLES="$1" -e SEED_OPEN=true \
+    -e LITESTREAM_REPLICA_URL="${2:-}" "$IMAGE" >/dev/null
 }
 
 # 起きるまで待つ。健康を答えられるようになったら次へ進む。
@@ -185,6 +188,25 @@ echo "OK  同じ施設を読み戻している"
 # **監視に接続数が出ること**（CLAUDE.md 8）。いま誰も見ていないので 0。
 [ "$(field connections)" = "0" ] || fail "接続数が出ていない（$(field connections)）"
 echo "OK  監視に接続数が出る"
+
+# ---- 3 回目: 複製ありで起こす（9.11、ADR-0019） ----
+#
+# **複製の設定があっても、いつもどおり起きること。** ここが通らないと、
+# バックアップを有効にした瞬間に本番が起きなくなる。宛先はコンテナの中の
+# ディレクトリにする（S3 の鍵を CI に置かないため）。
+
+cleanup
+start 8 "file:///data/backup"
+wait_healthy
+echo "OK  複製ありでも起動する"
+
+[ "$(field tables)" = "4" ] || fail "複製ありにしたら記録が変わった（席 $(field tables)）"
+echo "OK  複製ありでも記録は同じ"
+
+# **本当に写しているか。** 設定を読んだだけで何もしていない、を見逃さない。
+docker exec "$NAME" sh -c 'ls /data/backup/ltx >/dev/null 2>&1' \
+  || fail "複製先に何も書かれていない"
+echo "OK  複製先に書かれている"
 
 # ---- 後始末 ----
 

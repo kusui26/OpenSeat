@@ -22,6 +22,12 @@ services:
       SEED_OPEN: "true"
       # 版を画面に出すためだけのもの。Railway では GIT_SHA が入る。
       GIT_SHA: local
+      # **記録を外へ写す**（9.11、ADR-0019）。空なら複製しない ——
+      # S3 を持たない施設でも、これだけで起動できるようにしてある。
+      # 宛先の書き方は `infra/litestream.yml` の冒頭にある。
+      LITESTREAM_REPLICA_URL: "${LITESTREAM_REPLICA_URL:-}"
+      LITESTREAM_ACCESS_KEY_ID: "${LITESTREAM_ACCESS_KEY_ID:-}"
+      LITESTREAM_SECRET_ACCESS_KEY: "${LITESTREAM_SECRET_ACCESS_KEY:-}"
     volumes:
       # **記録はここに残る。** コンテナを作り直しても消えない。
       - openseat-data:/data
