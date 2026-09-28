@@ -27,6 +27,7 @@ import { openHub, type Hub } from '../stream/hub.js';
 import { buildApp, type Health } from './app.js';
 import { readConfig, type Config } from './config.js';
 import { ensureVenue } from './seed.js';
+import { stopServing } from './shutdown.js';
 import { webApp } from './web.js';
 
 /** 時刻を進める間隔（9.4）。**個別のタイマーは持たない。** */
@@ -166,11 +167,14 @@ console.log(`OpenSeat を ${String(config.port)} で待ち受けます（記録:
  * 終了の合図で、開いているものを閉じる。
  *
  * **再デプロイのときに記録を閉じられないと、WAL が残ったまま次が起きる。**
- * `Dockerfile` が `node` を PID 1 にしてあるのは、この合図を届けるためである。
+ * `entrypoint.sh` がこの合図を `node` まで届けるようにしてある。
+ *
+ * **配信が開いていても止まる。** 開いたままの接続を待つと、置き場に強制終了
+ * されるまで戻らない（[`shutdown.ts`](shutdown.ts)）。
  */
 function shutdown(): void {
   clearInterval(ticker);
-  server.close(() => {
+  stopServing(server, () => {
     connection.close();
     process.exit(0);
   });

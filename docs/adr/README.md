@@ -30,6 +30,7 @@
 | [0017](0017-no-component-library-yet.md) | 画面の部品一式（shadcn/ui）は入れず、素の要素で作る | Accepted | 2026-09-22 |
 | [0018](0018-server-sent-events.md) | 配信は SSE 1 本にし、流すのはイベントではなく「いまの姿」とする | Accepted | 2026-09-22 |
 | [0019](0019-where-to-run-it.md) | 試行は Railway に置き、実証実験の前に国内 VPS へ移す。複製先は Cloudflare R2 とする | Accepted | 2026-09-25 |
+| [0020](0020-who-the-container-runs-as.md) | コンテナは root で起こし、記録の置き場の持ち主を直してから `node` に降りる | Accepted | 2026-09-28 |
 
 ## テンプレート
 

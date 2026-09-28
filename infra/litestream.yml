@@ -21,7 +21,7 @@
 #
 # | 宛先 | `LITESTREAM_REPLICA_URL` |
 # |---|---|
-# | Cloudflare R2 | `s3://BUCKET/openseat?endpoint=ACCOUNT_ID.r2.cloudflarestorage.com&region=auto` |
+# | Cloudflare R2 | `s3://BUCKET/openseat?endpoint=ACCOUNT_ID.r2.cloudflarestorage.com` |
 # | 同じホストの別ディスク | `file:///mnt/backup/openseat` |
 #
 # **鍵はバケット 1 つに絞ること。** 漏れたときに届く範囲を、この用途だけに閉じる

@@ -7,8 +7,8 @@
 #
 #   ./infra/measure-downtime.sh https://<ドメイン>
 #
-# **これを動かしたまま、別の窓で `railway up` してください。** 止まった時間を数え、
-# 戻ったところで終わります。Ctrl+C でいつでも止められます。
+# **これを動かしたまま、Railway のダッシュボードで Redeploy してください。**
+# 止まった時間を数え、戻ったところで終わります。Ctrl+C でいつでも止められます。
 
 set -euo pipefail
 
