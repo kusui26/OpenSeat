@@ -56,15 +56,31 @@ RUN pnpm --filter "./${APP}" --prod deploy --legacy /out
 FROM node:22-alpine AS litestream
 
 ARG LITESTREAM_VERSION=0.5.17
-# `docker build` が入れてくれる（`amd64` / `arm64`）。
+# BuildKit なら `amd64` / `arm64` が入る。**入れてくれない組み立て環境もある**
+# （Railway は入るとも入らないとも書いていない）ので、空なら組み立てている
+# マシンの `uname -m` を使う。
 ARG TARGETARCH
 
+WORKDIR /tmp/litestream
+
 # **配布物の名前は `x86_64` で、`amd64` ではない。** そのまま繋ぐと 404 になる。
+#
+# **配布元の `checksums.txt` と照合してから使う。** 鍵を持たせて走らせるものなので、
+# 途中で差し替えられたものを入れない（`restore-drill.sh` が手元でする照合と同じ）。
 RUN apk add --no-cache curl \
- && ARCH="$(test "${TARGETARCH}" = "amd64" && echo x86_64 || echo "${TARGETARCH}")" \
- && curl -fsSL -o /tmp/litestream.tar.gz \
-      "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${ARCH}.tar.gz" \
- && tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream \
+ && case "${TARGETARCH:-$(uname -m)}" in \
+      amd64|x86_64) ARCH=x86_64 ;; \
+      arm64|aarch64) ARCH=arm64 ;; \
+      *) echo "Litestream の配布物が無いアーキテクチャです: ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
+    esac \
+ && FILE="litestream-${LITESTREAM_VERSION}-linux-${ARCH}.tar.gz" \
+ && RELEASE="https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}" \
+ && curl -fsSLO "${RELEASE}/${FILE}" \
+ && curl -fsSLO "${RELEASE}/checksums.txt" \
+ && SUM="$(awk -v f="${FILE}" '$2 == f' checksums.txt)" \
+ && test -n "${SUM}" \
+ && echo "${SUM}" | sha256sum -c - \
+ && tar -xzf "${FILE}" -C /usr/local/bin litestream \
  && /usr/local/bin/litestream version
 
 # ---- 3. 走らせる ----
@@ -72,6 +88,10 @@ FROM node:22-alpine AS run
 
 LABEL org.opencontainers.image.source="https://github.com/kusui26/OpenSeat"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# **root から降りる道具**（下の「誰として走るか」）。`exec` と同じく自分を
+# 置き換えて降りるので、合図の届き方が変わらない。
+RUN apk add --no-cache su-exec
 
 # **記録はボリュームに置く。** ここを外に出しておかないと、再デプロイのたびに
 # 消える（9.13 の Railway のボリューム）。
@@ -92,10 +112,19 @@ COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 COPY infra/litestream.yml /etc/litestream.yml
 COPY infra/entrypoint.sh /app/entrypoint.sh
 
-# **root で走らせない。** `node` は公式イメージに元からいる非特権ユーザー。
+# ## 誰として走るか（[ADR-0020](../docs/adr/0020-who-the-container-runs-as.md)）
+#
+# **アプリは root で走らせない。** `node` は公式イメージに元からいる非特権ユーザー。
+#
+# ただし `USER node` にはしない。つながれた置き場が root の持ち物だと、`node` は
+# 記録を 1 行も書けずに落ち、再起動を繰り返す —— **Railway のボリュームはそう
+# つながる**（公式に明記）。起動の最初の一瞬だけ root で持ち主を直し、
+# `entrypoint.sh` が `node` に降りる。
 RUN mkdir -p /data && chmod +x /app/entrypoint.sh && chown -R node:node /data /app
-USER node
-VOLUME ["/data"]
+
+# **`VOLUME` は書かない。** Railway はこの行があると組み立てを拒む。置き場を
+# つなぐのは起こす側の仕事にする（`docker-compose.yml` の `volumes`、
+# `docker run -v`、Railway のボリューム）。
 EXPOSE 8080
 
 # 外形監視と、置き場のヘルスチェックの両方がこれを見る。
@@ -103,6 +132,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # **`SIGTERM` が `node` まで届くこと。** 届かないと、再デプロイのときに記録を
-# 閉じられない（9.13 の「短い停止」）。`entrypoint.sh` は `exec` で自分を置き換え、
-# Litestream は受け取った合図を子へ渡す（どちらも確認済み）。
+# 閉じられない（9.13 の「短い停止」）。`entrypoint.sh` と `su-exec` は `exec` で
+# 自分を置き換え、Litestream は受け取った合図を子へ渡す。`node` は画面が開いて
+# いても 1 秒ほどで止まる（`apps/server/src/shutdown.ts`）。**画面を開いたまま
+# 止めて確かめるのは `smoke.sh`** である（CI の `image` ジョブ）。
 ENTRYPOINT ["/app/entrypoint.sh"]

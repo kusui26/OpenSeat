@@ -6,6 +6,10 @@
 # 後者はボリュームの確認で、Railway に置いたときに「再デプロイで記録が消えないか」
 # を見るのと同じ形である（9.13）。
 #
+# **Railway と同じつながり方で試す。** 置き場は root の持ち物にしておき、画面を
+# 開いたまま止める。どちらも手元で試すときには起きにくく、**本番では必ず
+# 起きる**（ADR-0020）。
+#
 #   ./infra/smoke.sh [イメージ名]
 #
 # 通れば 0、詰まれば 1 で終わる。
@@ -54,13 +58,35 @@ field() {
     "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)['$1']))"
 }
 
+# PID 1 の持ち主。root から降りていれば `node` になる。
+pid1_owner() {
+  docker exec "$NAME" stat -c %U /proc/1
+}
+
 # ---- 1 回目: 何も無いところに 4 席で起こす ----
 
 docker volume rm "$VOLUME" >/dev/null 2>&1 || true
 cleanup
+
+# **置き場を root の持ち物にしておく。** Railway のボリュームはこの形でつながる
+# （公式に明記）。`entrypoint.sh` が持ち主を直してから降りなければ、記録を 1 行も
+# 書けずに落ちる（ADR-0020）。
+#
+# 中に root のファイルを 1 つ置く。空のままだと、Docker がつなぐたびにイメージの
+# `/data` の持ち主（node）を写し直してしまい、root の持ち物にならない。
+docker run --rm --user root --entrypoint sh -v "${VOLUME}:/data" "$IMAGE" \
+  -c 'chown root:root /data && chmod 755 /data && touch /data/left-by-root'
+
 start 4
 wait_healthy
-echo "OK  起動して健康を答える"
+echo "OK  起動して健康を答える（置き場が root の持ち物でも）"
+
+[ "$(pid1_owner)" = "node" ] || fail "アプリが root のまま走っている（$(pid1_owner)）"
+echo "OK  node に降りて走っている"
+
+[ "$(docker exec "$NAME" stat -c %U /data/left-by-root)" = "node" ] \
+  || fail "置き場の中身の持ち主が直っていない"
+echo "OK  置き場の持ち主を、中身ごと直した"
 
 [ "$(field ok)" = "true" ] || fail "施設を読み出せていない"
 [ "$(field migrations)" -gt 0 ] || fail "マイグレーションが当たっていない（$(field migrations) 件）"
@@ -207,6 +233,30 @@ echo "OK  複製ありでも記録は同じ"
 docker exec "$NAME" sh -c 'ls /data/backup/ltx >/dev/null 2>&1' \
   || fail "複製先に何も書かれていない"
 echo "OK  複製先に書かれている"
+
+# いま PID 1 にいるのは Litestream。**複製する側も root で走らせない。**
+[ "$(pid1_owner)" = "node" ] || fail "Litestream が root のまま走っている（$(pid1_owner)）"
+echo "OK  Litestream も node で走っている"
+
+# ---- 止め方（9.13） ----
+#
+# **画面が開いていても、終了の合図で止まること。** 止まらないと、置き場は
+# 強制終了するまで待つ —— そのあいだ再デプロイが止まり、記録も閉じられない。
+# 合図は Litestream → node と渡る（`entrypoint.sh`）。
+#
+# `docker stop` は 10 秒待ってから強制終了するので、**終わり方で見分ける。**
+# 強制終了なら終了コードは 137 になる。
+
+curl -sN "${BASE}/api/v/smoke/stream" >/dev/null 2>&1 &
+HOLD=$!
+sleep 1
+# **本当に開いているか。** 開いていなければ、何も確かめずに通ってしまう。
+[ "$(field connections)" = "1" ] || fail "配信を開けていない（接続 $(field connections)）"
+docker stop "$NAME" >/dev/null
+kill "$HOLD" 2>/dev/null || true
+EXIT="$(docker inspect -f '{{.State.ExitCode}}' "$NAME")"
+[ "$EXIT" = "0" ] || fail "画面が開いていると止まらない（終了コード ${EXIT}。強制終了された）"
+echo "OK  画面が開いていても、終了の合図で止まる"
 
 # ---- 後始末 ----
 
