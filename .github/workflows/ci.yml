@@ -199,17 +199,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # **`Dockerfile` と同じ版を使う。** 0.5 系は 0.3 系の複製から戻せないので、
-      # ここと本番で版がずれると、確かめたことにならない。
-      - name: Litestream を用意する
-        run: |
-          VERSION="$(grep -oE 'LITESTREAM_VERSION=[0-9.]+' infra/Dockerfile | cut -d= -f2)"
-          echo "Litestream ${VERSION} を使います"
-          # **配布物の名前は `x86_64`。** `amd64` では 404 になる。
-          curl -fsSL "https://github.com/benbjohnson/litestream/releases/download/v${VERSION}/litestream-${VERSION}-linux-x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin litestream
-          litestream version
-
+      # **Litestream は、リハーサルが自分で取ってくる。** `Dockerfile` と同じ版を、
+      # 配布元のチェックサムと照合してから使う（0.5 系は 0.3 系の複製から戻せない
+      # ので、版がずれると確かめたことにならない）。**開発者の手元と同じ道を通す。**
       - name: 復元のリハーサル
         run: ./infra/restore-drill.sh
 
